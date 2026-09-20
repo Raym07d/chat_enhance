@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Markdown Copy",
+  "version": "0.3.2",
+  "description": "Adds Markdown and Word copy buttons to ChatGPT responses with editable formula support.",
+  "permissions": [
+    "clipboardWrite",
+    "storage"
+  ],
+  "action": {
+    "default_title": "ChatGPT Markdown Copy 设置",
+    "default_popup": "popup.html"
+  },
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "vendor/katex/katex.min.js",
+        "markdown.js",
+        "word.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ChatGPT Markdown Copy 设置</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>Markdown Copy</h1>
+      <label class="setting" for="compact-math">
+        <span class="setting__copy">
+          <strong>合并公式内部换行</strong>
+          <span>提高不同 Markdown 编辑器的公式兼容性</span>
+        </span>
+        <span class="switch">
+          <input id="compact-math" type="checkbox">
+          <span class="switch__track" aria-hidden="true"></span>
+        </span>
+      </label>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
