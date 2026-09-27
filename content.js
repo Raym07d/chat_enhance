@@ -4,6 +4,7 @@
   const MARKDOWN_BUTTON_ATTRIBUTE = "data-chat-enhance-copy-markdown";
   const WORD_BUTTON_ATTRIBUTE = "data-chat-enhance-copy-word";
   const MESSAGE_SELECTOR = '[data-message-author-role="assistant"]';
+  const CURRENT_MESSAGE_SELECTOR = '[data-content-search-unit-key$=":assistant"]';
   const COPY_TEST_IDS = new Set([
     "copy-turn-action-button",
     "copy-response-button"
@@ -43,13 +44,22 @@
 
   function responseContent(message) {
     return message.querySelector(
-      ".markdown, [data-message-content], [class*='markdown']"
+      '[data-markdown-text-style="assistant-message"], .markdown, [data-message-content], [class*="markdown"]'
     );
   }
 
   function resolveAssistantMessage(button) {
     const direct = button.closest(MESSAGE_SELECTOR);
     if (direct) return direct;
+
+    // Current ChatGPT turns contain both the user prompt and assistant reply.
+    // The action bar is a sibling of the reply, so stay inside this turn.
+    const actionBar = button.closest(".turn-action-controls");
+    const currentTurn = actionBar?.closest("[data-turn-key]");
+    const currentMessage = currentTurn?.querySelector(CURRENT_MESSAGE_SELECTOR);
+    if (currentMessage?.querySelector('[data-markdown-text-style="assistant-message"]')) {
+      return currentMessage;
+    }
 
     const turn = button.closest(
       'article[data-turn="assistant"], article[data-testid^="conversation-turn"], [data-turn="assistant"], [data-testid^="conversation-turn"]'
@@ -72,6 +82,10 @@
       label.includes("copy response") ||
       label.includes("复制回复");
     if (!matchesCopy) return false;
+
+    if (button.closest(".turn-action-controls")) {
+      return Boolean(resolveAssistantMessage(button));
+    }
 
     // Avoid copy buttons that belong to code blocks or other nested widgets.
     const message = resolveAssistantMessage(button);

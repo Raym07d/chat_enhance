@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>ChatGPT current layout fixture</title>
+<link rel="stylesheet" href="../content.css">
+<body>
+  <div data-turn-key="formula-turn">
+    <div class="group flex flex-col">
+      <div>
+        <div><h4>你说：</h4><p>用户问题不能进入复制结果。</p></div>
+        <div data-content-search-unit-key="formula:2:assistant">
+          <h4 data-conversation-role="assistant">ChatGPT 说：</h4>
+          <div data-markdown-text-style="assistant-message">
+            <p>价格为 <span data-math-display="false" data-math-source="X=\$100"><span class="katex">渲染文字</span></span>。</p>
+            <span data-math-display="true" data-math-source="a+b"><span class="katex">渲染文字</span></span>
+          </div>
+        </div>
+      </div>
+      <div class="turn-action-controls"><span class="contents"><button type="button" aria-label="复制">复制</button></span></div>
+    </div>
+  </div>
+  <div data-turn-key="table-turn">
+    <div class="group flex flex-col">
+      <div data-content-search-unit-key="table:2:assistant">
+        <h4 data-conversation-role="assistant">ChatGPT 说：</h4>
+        <div data-markdown-text-style="assistant-message">
+          <p>示例表格</p>
+          <table><thead><tr><th>型号</th><th>销量</th></tr></thead><tbody><tr><td>iPhone</td><td>100</td></tr></tbody></table>
+        </div>
+      </div>
+      <div class="turn-action-controls"><span class="contents"><button type="button" aria-label="复制">复制</button></span></div>
+    </div>
+  </div>
+  <script src="../vendor/katex/katex.min.js"></script>
+  <script src="../markdown.js"></script>
+  <script src="../word.js"></script>
+  <script src="../content.js"></script>
+  <pre id="results"></pre>
+  <script>
+    const messages = [...document.querySelectorAll('[data-content-search-unit-key$=":assistant"]')];
+    const markdown = messages.map((message) => ChatEnhanceMarkdown.responseToMarkdown(message));
+    const word = messages.map((message) => ChatEnhanceWord.responseToWordHTML(message));
+    document.querySelector("#results").textContent = JSON.stringify({
+      markdown,
+      wordHasMathML: word[0].includes('<math xmlns="http://www.w3.org/1998/Math/MathML"'),
+      wordHasTable: word[1].includes("<table"),
+      buttonCount: document.querySelectorAll("[data-chat-enhance-copy-markdown]").length
+    });
+  </script>
+</body>
+</html>

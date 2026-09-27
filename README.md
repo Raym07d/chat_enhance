@@ -1,6 +1,6 @@
 # ChatGPT Markdown Copy
 
-一个无需构建的 Chrome/Edge Manifest V3 扩展。在 ChatGPT 每条回复的原生复制按钮旁增加“复制 Markdown”和“复制到 Word”按钮，并从页面 DOM 的 `data-math-source` 恢复原始 LaTeX。
+一个无需构建的 Chrome/Edge Manifest V3 扩展。在 ChatGPT 每条回复的原生复制按钮旁增加“复制 Markdown”和“复制到 Word”按钮，并从页面 DOM 的 `data-math-source` 恢复原始 LaTeX。兼容新版 ChatGPT 回复容器与 `data-math-display` 公式节点。
 
 ## 安装
 
@@ -41,6 +41,6 @@ Word 公式转换使用随扩展本地打包的 KaTeX 0.18.7（MIT License），
 ## 已知限制
 
 - ChatGPT 改动回复操作栏结构后，复制按钮定位规则可能需要更新。
-- 公式只从 ChatGPT 当前的 `[role="math"][data-math-source]` 获取。如果发现公式节点却没有源码，扩展会明确报错，不会退回视觉文字并静默产生损坏结果。
+- 公式从 ChatGPT 当前的 `[data-math-source]` 获取。如果发现公式节点却没有源码，扩展会明确报错，不会退回视觉文字并静默产生损坏结果。
 - Word 粘贴为原生公式需要支持 MathML 导入的 Microsoft 365 Word；较旧版本可能把公式作为普通内容处理。
 - 复杂的交互式组件、图表和 Canvas 无法完整转换为 Markdown。

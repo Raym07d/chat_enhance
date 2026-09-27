@@ -62,6 +62,7 @@
 
   function findResponseContent(message) {
     return (
+      message.querySelector('[data-markdown-text-style="assistant-message"]') ||
       message.querySelector("[data-message-content]") ||
       message.querySelector(".markdown") ||
       message.querySelector("[class*='markdown']") ||
@@ -84,10 +85,11 @@
       const tag = element.tagName;
       if (SKIP_TAGS.has(tag) || element.getAttribute("role") === "button") return "";
 
-      if (element.matches('[role="math"][data-math-source]')) {
+      if (element.hasAttribute("data-math-source")) {
         const latex = element.getAttribute("data-math-source").trim();
         if (!latex) throw new Error("发现没有源码的公式");
-        const display = Boolean(element.querySelector(".katex-display")) ||
+        const display = element.getAttribute("data-math-display") === "true" ||
+          Boolean(element.querySelector(".katex-display")) ||
           element.style.display === "block";
         const mathML = latexToMathML(latex, display);
         return display

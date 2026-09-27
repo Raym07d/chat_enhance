@@ -76,21 +76,22 @@
   function replaceMath(root, options) {
     const documentRef = root.ownerDocument;
 
-    // ChatGPT keeps the original TeX on an outer semantic wrapper:
-    // <span role="math" data-math-source="..."><span class="katex">...</span></span>
-    for (const wrapper of Array.from(root.querySelectorAll('[role="math"][data-math-source]'))) {
+    // ChatGPT keeps the original TeX on an outer wrapper. Recent versions
+    // use data-math-display without role="math".
+    for (const wrapper of Array.from(root.querySelectorAll("[data-math-source]"))) {
       if (wrapper.closest("pre, code")) continue;
       const source = wrapper.getAttribute("data-math-source");
       const tex = options.compactMath
         ? compactMathNewlines(source)
         : cleanTex(source);
       if (!tex) continue;
-      const display = Boolean(wrapper.querySelector(".katex-display")) ||
+      const display = wrapper.getAttribute("data-math-display") === "true" ||
+        Boolean(wrapper.querySelector(".katex-display")) ||
         wrapper.style.display === "block";
       wrapper.replaceWith(makeMathPlaceholder(documentRef, tex, display));
     }
 
-    const unresolvedMath = Array.from(root.querySelectorAll('[role="math"], .katex'))
+    const unresolvedMath = Array.from(root.querySelectorAll('[role="math"], .katex, math'))
       .find((element) => !element.closest("pre, code, [data-chat-enhance-math]"));
     if (unresolvedMath) {
       throw new Error("发现无法读取源码的公式，请刷新页面或更新扩展");
@@ -256,6 +257,7 @@
 
   function findResponseContent(message) {
     return (
+      message.querySelector('[data-markdown-text-style="assistant-message"]') ||
       message.querySelector("[data-message-content]") ||
       message.querySelector(".markdown") ||
       message.querySelector("[class*='markdown']") ||
