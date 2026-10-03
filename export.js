@@ -15,41 +15,85 @@
     "[data-chat-enhance-copy-word]", "svg script", "svg foreignObject"
   ].join(",");
 
+  // The live stylesheet supplies typography, code panes, tables and theme colors.
+  // These overrides only remove app/virtualizer constraints from the saved document.
   const EXPORT_CSS = `
-    :root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: #fff; color: #1f2937; font-size: 16px; line-height: 1.65; }
-    header { border-bottom: 1px solid #e5e7eb; padding: 24px max(20px, calc((100vw - 860px) / 2)); }
-    header h1 { margin: 0; font-size: 22px; line-height: 1.35; overflow-wrap: anywhere; }
-    header a { display: inline-block; margin-top: 6px; font-size: 13px; }
-    main { width: min(100%, 900px); margin: 0 auto; padding: 24px 20px 72px; }
-    .turn { display: flow-root; margin: 0 0 32px; }
-    .message { min-width: 0; margin: 0 0 16px; overflow-wrap: anywhere; }
-    .message--user { max-width: 82%; margin-left: auto; padding: 12px 16px; border-radius: 18px; background: #f3f4f6; }
-    .message--assistant { width: 100%; }
-    .message .sr-only, .message [hidden] { display: none !important; }
-    .message p { margin: 0 0 1em; }
-    .message p:last-child { margin-bottom: 0; }
-    .message h1, .message h2, .message h3, .message h4, .message h5, .message h6 { line-height: 1.35; margin: 1.3em 0 .55em; }
-    .message h1 { font-size: 1.65em; } .message h2 { font-size: 1.35em; } .message h3 { font-size: 1.15em; }
-    .message ul, .message ol { padding-left: 1.6em; margin: .6em 0 1em; }
-    .message li { margin: .25em 0; }
-    .message blockquote { margin: 1em 0; padding: .25em 1em; border-left: 3px solid #cbd5e1; color: #4b5563; }
-    .message pre { overflow: auto; max-width: 100%; padding: 14px 16px; border-radius: 10px; background: #f3f4f6; white-space: pre; font-size: .88em; }
-    .message code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em; }
-    .message :not(pre) > code { padding: .15em .35em; border-radius: 4px; background: #f3f4f6; }
-    .message table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 1em 0; }
-    .message th, .message td { border: 1px solid #d1d5db; padding: 7px 10px; text-align: left; white-space: nowrap; }
-    .message th { background: #f3f4f6; font-weight: 650; }
-    .message img, .message canvas { max-width: 100%; height: auto; border-radius: 6px; }
-    .message math { font-size: 1.05em; }
-    .message math[display="block"] { display: block; max-width: 100%; overflow-x: auto; margin: 1em 0; text-align: center; }
-    .message svg { max-width: 100%; height: auto; }
-    .message [data-user-message-bubble] { max-width: 100%; }
-    a { color: #1167b1; }
-    @media (max-width: 600px) { header { padding: 20px 16px; } main { padding: 20px 16px 50px; } .message--user { max-width: 94%; } }
-    @media print { header a { display: none; } main { width: 100%; padding: 0; } .turn { break-inside: avoid; } }
+    html, body { height: auto !important; min-height: 100%; overflow: visible !important; }
+    body { margin: 0; }
+    .export-header { max-width: var(--export-width); margin: 0 auto; padding: 24px 20px; }
+    .export-header h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+    .export-header a { font-size: 13px; text-decoration: underline; }
+    .export-container { container-type: inline-size; container-name: thread-content; }
+    .export-transcript { width: 100%; max-width: var(--export-width); margin: 0 auto; padding: 0 20px 64px; }
+    .export-transcript > .turn { margin-bottom: 12px; }
+    .export-transcript [data-virtualized-turn-content] { content-visibility: visible !important; contain: none !important; }
+    .export-transcript img { max-width: 100%; }
+    .export-transcript .cm-content { white-space: pre !important; }
+    .export-transcript .cm-line { display: block; }
+    .export-transcript .cm-gap, .export-transcript .cm-announced, .export-transcript .cm-cursorLayer,
+    .export-transcript .cm-selectionLayer, .export-transcript .sr-only, .export-transcript [hidden] { display: none !important; }
+    .export-transcript .cm-scroller { overflow: auto; }
+    .export-transcript .export-static-code { padding-top: 12px; }
+    .export-code-comment { color: var(--color-codex-syntax-comment); font-style: normal; }
+    @container style(--theme-variant: light) { .export-code-comment { font-style: italic; } }
+    .export-transcript [data-markdown-text-style] { overflow-wrap: anywhere; }
+    @media print { .export-header a { display: none; } }
   `;
+
+  const usedFonts = new Set();
+  function rememberFonts(root) {
+    for (const element of [root, ...root.querySelectorAll(".cm-content, .katex, .katex *")]) {
+      for (const family of getComputedStyle(element).fontFamily.split(",")) {
+        usedFonts.add(family.trim().replace(/^['"]|['"]$/g, "").toLowerCase());
+      }
+    }
+  }
+
+  async function captureAppearance() {
+    const container = document.querySelector("[data-thread-user-message-navigation-content]") || document.body;
+    const computed = getComputedStyle(container);
+    const body = getComputedStyle(document.body);
+    const variables = Array.from(computed).filter((name) => name.startsWith("--"))
+      .map((name) => `${name}:${computed.getPropertyValue(name)};`).join("");
+    const fontCache = new Map();
+    const sheets = [];
+    for (const sheet of [...document.styleSheets, ...document.adoptedStyleSheets]) {
+      try { sheets.push({ css: Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n"), base: sheet.href || location.href }); }
+      catch { throw new Error("无法读取网页样式，请刷新页面后重试"); }
+    }
+    const styles = await Promise.all(sheets.map(async ({ css, base }) => {
+      const faces = Array.from(css.matchAll(/@font-face\s*\{[^}]*\}/gi));
+      for (const [face] of faces) {
+        const family = /font-family:\s*([^;]+)/i.exec(face)?.[1].trim().replace(/^['"]|['"]$/g, "").toLowerCase();
+        let replacement = "";
+        if (usedFonts.has(family)) {
+          const sources = Array.from(face.matchAll(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/gi));
+          const source = sources.find((match) => /woff2(?:[?#]|$)/i.test(match[1])) || sources[0];
+          if (source) {
+            const url = new URL(source[1], base).href;
+            if (!fontCache.has(url)) fontCache.set(url, (async () => {
+              const response = await fetch(url);
+              if (!response.ok) throw new Error(`字体读取失败：HTTP ${response.status}`);
+              return blobDataURL(await response.blob());
+            })());
+            const data = await fontCache.get(url);
+            replacement = face.replace(/src:[^;]+;/i, `src:url("${data}");`);
+          }
+        }
+        css = css.replace(face, replacement);
+      }
+      // Saved files must not make hidden network requests for unrelated app assets.
+      return css.replace(/@import\s+[^;]+;/gi, "")
+        .replace(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/gi, (match, url) => url.startsWith("data:") ? match : 'url("")');
+    }));
+    return {
+      css: styles.join("\n") + `\n:root{${variables}} body{background:${body.backgroundColor};color:${body.color};font:${body.font};}`,
+      htmlClass: document.documentElement.className,
+      bodyClass: document.body.className,
+      width: container === document.body ? "808px" : computed.width,
+      containerClass: container.className
+    };
+  }
 
   function delay(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -116,6 +160,8 @@
       if (!math) {
         throw new Error("有公式无法离线保存，请刷新页面后重试");
       }
+      // Keep KaTeX's visual tree when available; MathML remains for accessibility.
+      if (wrapper.querySelector(".katex-html")) continue;
       const replacement = math.cloneNode(true);
       const display = wrapper.getAttribute("data-math-display") === "true" ||
         Boolean(wrapper.querySelector(".katex-display")) ||
@@ -156,6 +202,17 @@
     if (!/^(https?:|blob:)/i.test(source)) throw new Error("对话图片地址无效，无法离线保存");
     if (cache.has(source)) return cache.get(source);
     const promise = (async () => {
+      // Extension background fetches bypass image CORS; avoid two doomed attempts first.
+      if (source.startsWith("https:") && new URL(source).origin !== location.origin && globalThis.chrome?.runtime?.sendMessage) {
+        const result = await chrome.runtime.sendMessage({ type: "chat-enhance-read-image", url: source });
+        if (result?.ok && result.data?.startsWith("data:image/")) return result.data;
+        if (result?.permissionOrigin) {
+          const error = new Error(`需要允许读取 ${new URL(source).hostname} 的图片`);
+          error.permissionOrigin = result.permissionOrigin;
+          throw error;
+        }
+        if (result?.error) throw new Error(`无法读取 ${new URL(source).hostname} 的图片（${result.error}）`);
+      }
       try {
         const response = await fetch(source);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -192,11 +249,11 @@
   async function inlineMedia(original, clone, cache) {
     const sourceImages = Array.from(original.querySelectorAll("img"));
     const clonedImages = Array.from(clone.querySelectorAll("img"));
-    for (let index = 0; index < clonedImages.length; index += 1) {
+    await Promise.all(clonedImages.map(async (image, index) => {
       const source = sourceImages[index]?.currentSrc || sourceImages[index]?.src || "";
       if (!source) {
         clonedImages[index].replaceWith(document.createTextNode(clonedImages[index].alt || "[图片]"));
-        continue;
+        return;
       }
       try {
         clonedImages[index].src = await imageDataURL(source, sourceImages[index], cache);
@@ -207,7 +264,7 @@
       }
       clonedImages[index].removeAttribute("srcset");
       clonedImages[index].removeAttribute("loading");
-    }
+    }));
 
     const sourceCanvases = Array.from(original.querySelectorAll("canvas"));
     const clonedCanvases = Array.from(clone.querySelectorAll("canvas"));
@@ -239,9 +296,14 @@
     for (const element of [clone, ...clone.querySelectorAll("*")]) {
       for (const attribute of Array.from(element.attributes)) {
         if (/^on/i.test(attribute.name) || [
-          "style", "contenteditable", "autofocus", "srcdoc", "nonce", "integrity",
+          "contenteditable", "autofocus", "srcdoc", "nonce", "integrity",
           "formaction", "action", "ping", "poster", "srcset"
         ].includes(attribute.name)) element.removeAttribute(attribute.name);
+      }
+      if (element.hasAttribute("style")) {
+        for (const property of Array.from(element.style)) {
+          if (/url\(|expression\(|@import/i.test(element.style.getPropertyValue(property))) element.style.removeProperty(property);
+        }
       }
       if (element.tagName === "A") {
         const href = element.getAttribute("href") || "";
@@ -281,25 +343,57 @@
     }
   }
 
-  async function captureTurn(root, cache) {
-    const candidates = Array.from(root.querySelectorAll(UNIT_SELECTOR));
-    if (root.matches(UNIT_SELECTOR) || root.hasAttribute("data-message-author-role")) candidates.unshift(root);
-    const units = candidates.filter((unit) => !candidates.some((parent) =>
-      parent !== unit && parent.contains(unit)
-    ));
-    const messages = [];
-    for (const unit of units) {
-      const clone = unit.cloneNode(true);
-      await inlineMedia(unit, clone, cache);
-      replaceMath(clone);
-      sanitize(clone);
-      const role = roleForUnit(unit);
-      messages.push(`<section class="message message--${role}" aria-label="${role === "user" ? "用户" : "ChatGPT"}">${clone.innerHTML}</section>`);
+  // Offscreen Python panes are plain-text placeholders in ChatGPT's virtualizer.
+  // Tokenize that text without changing it, using the same syntax colors as the editor.
+  function highlightStaticPython(clone) {
+    const keywords = new Set("and as assert async await break case class continue def del elif else except finally for from global if import in is lambda match nonlocal not or pass raise return try while with yield".split(" "));
+    const tokens = /(?<string>(?:[rbuf]{1,2})?(?:"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))|(?<comment>#[^\n]*)|(?<number>\b(?:0[xob][\da-f_]+|\d[\d_]*(?:\.[\d_]*)?(?:e[+-]?[\d_]+)?j?)\b)|(?<identifier>[_\p{ID_Start}][_\p{ID_Continue}]*)|(?<operator>[+*/%=<>!&|^~.:-])/giu;
+    for (const frame of clone.querySelectorAll('[data-markdown-copy="code-block"]')) {
+      const code = frame.querySelector("code");
+      if (code && Array.from(code.classList).some((name) => name.startsWith("CodeContent-"))) code.classList.add("export-static-code");
+      const label = frame.querySelector('[data-markdown-copy="exclude"]')?.textContent.trim() || "";
+      if (!code || !/^python\b/i.test(label)) continue;
+      // Some placeholder variants use <br> for empty lines instead of text nodes.
+      for (const lineBreak of code.querySelectorAll("br")) lineBreak.replaceWith(document.createTextNode("\n"));
+      const text = code.textContent;
+      const fragment = document.createDocumentFragment();
+      let offset = 0;
+      for (const token of text.matchAll(tokens)) {
+        fragment.append(document.createTextNode(text.slice(offset, token.index)));
+        const value = token[0];
+        let type = token.groups.string ? "string" : token.groups.number ? "literal" : token.groups.operator ? "keyword" : "variable";
+        if (keywords.has(value)) type = "keyword";
+        if (["True", "False", "None"].includes(value)) type = "literal";
+        if (token.groups.identifier && text[token.index - 1] === ".") type = "";
+        const span = document.createElement("span");
+        span.className = token.groups.comment ? "export-code-comment" : type ? `text-codex-syntax-${type}` : "";
+        span.textContent = value;
+        fragment.append(span);
+        offset = token.index + value.length;
+      }
+      fragment.append(document.createTextNode(text.slice(offset)));
+      code.replaceChildren(fragment);
     }
-    return `<article class="turn">${messages.join("")}</article>`;
+  }
+
+  async function captureTurn(root, cache) {
+    rememberFonts(root);
+    const clone = root.cloneNode(true);
+    await inlineMedia(root, clone, cache);
+    replaceMath(clone);
+    highlightStaticPython(clone);
+    sanitize(clone);
+    clone.classList.add("turn");
+    const candidates = [clone, ...clone.querySelectorAll(UNIT_SELECTOR)]
+      .filter((unit) => unit.matches(UNIT_SELECTOR) || unit.hasAttribute("data-message-author-role"));
+    for (const unit of candidates.filter((unit) => !candidates.some((parent) => parent !== unit && parent.contains(unit)))) {
+      unit.classList.add("message", `message--${roleForUnit(unit)}`);
+    }
+    return clone.outerHTML;
   }
 
   async function collectConversation() {
+    usedFonts.clear();
     const cache = new Map();
     const collected = new Map();
     const capturedIndices = new Set();
@@ -308,8 +402,21 @@
     const reverse = scroller && getComputedStyle(scroller).flexDirection === "column-reverse";
     const deadline = Date.now() + 300000;
 
+    function historyLoading() {
+      // During pagination, fallback-turn-0 refers to the oldest *loaded* turn.
+      // It cannot prove that the actual beginning of the conversation is loaded.
+      const walker = document.createTreeWalker(scroller, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (/^(?:Loading older messages|正在加载(?:较早|更早|历史|以前|旧).*消息|加载(?:较早|更早|历史|以前|旧).*消息)/i.test(node.textContent.trim()) &&
+            !node.parentElement.closest("[data-turn-key], article")) return true;
+      }
+      return Boolean(scroller.querySelector('[aria-busy="true"]'));
+    }
+
     async function captureRendered() {
       const roots = turnRoots();
+      const pending = [];
       for (const root of roots) {
         const key = root.getAttribute("data-turn-key") ||
           root.getAttribute("data-message-id") ||
@@ -318,11 +425,14 @@
           root.getAttribute("data-testid");
         if (!key) continue;
         if (collected.has(key)) continue;
-        collected.set(key, await captureTurn(root, cache));
+        const capture = captureTurn(root, cache);
+        collected.set(key, capture);
+        pending.push(capture);
         const marker = root.querySelector("[data-content-search-turn-key]")?.getAttribute("data-content-search-turn-key") || "";
         const index = /^fallback-turn-(\d+)$/.exec(marker);
         if (index) capturedIndices.add(Number(index[1]));
       }
+      await Promise.all(pending);
     }
 
     try {
@@ -341,7 +451,7 @@
             ?.getAttribute("data-content-search-turn-key") || "";
           const firstIndex = /^fallback-turn-(\d+)$/.exec(firstMarker);
           const hasOldestTurn = !firstIndex || Number(firstIndex[1]) === 0;
-          stableAtTop = atTop && hasOldestTurn && scroller.scrollHeight === lastHeight
+          stableAtTop = atTop && hasOldestTurn && !historyLoading() && scroller.scrollHeight === lastHeight
             ? stableAtTop + 1 : 0;
           lastHeight = scroller.scrollHeight;
           if (stableAtTop >= (firstIndex ? 2 : 12)) break;
@@ -349,7 +459,7 @@
         if (Date.now() >= historyDeadline) throw new Error("对话历史未能加载到第一条消息，请稍后重试");
 
         while (Date.now() < deadline) {
-          await delay(180);
+          await delay(100);
           await captureRendered();
           const end = reverse ? 0 : Math.max(0, scroller.scrollHeight - scroller.clientHeight);
           if (scroller.scrollTop >= end - 2) {
@@ -357,7 +467,12 @@
             await captureRendered();
             break;
           }
-          const step = Math.max(150, scroller.clientHeight * 0.75);
+          // Every mounted turn is captured in full, including the virtualizer's overscan.
+          // Jump to its last boundary instead of walking hundreds of empty viewports.
+          const roots = turnRoots();
+          const viewport = scroller.getBoundingClientRect();
+          const lastBottom = Math.max(...roots.map((root) => root.getBoundingClientRect().bottom));
+          const step = Math.max(scroller.clientHeight * 0.75, lastBottom - viewport.top - 100);
           scroller.scrollTop = Math.min(end, scroller.scrollTop + step);
         }
         if (Date.now() >= deadline) throw new Error("对话过长，尚未完整读取，请重试");
@@ -372,18 +487,21 @@
         if (!capturedIndices.has(index)) throw new Error(`第 ${index + 1} 轮对话未能读取，请重试`);
       }
     }
-    return Array.from(collected.values());
+    return Promise.all(collected.values());
   }
 
-  function buildHTML(title, sourceURL, turns) {
+  function buildHTML(title, sourceURL, turns, appearance = {}) {
     const safeTitle = escapeHTML(title);
     const safeURL = escapeHTML(sourceURL);
     return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-<title>${safeTitle}</title><style>${EXPORT_CSS}</style></head><body>
-<header><h1>${safeTitle}</h1><a href="${safeURL}" target="_blank" rel="noreferrer noopener">打开原对话</a></header>
-<main class="export-transcript">${turns.join("\n")}</main></body></html>`;
+<html lang="zh-CN" class="${escapeHTML(appearance.htmlClass || "")}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>${safeTitle}</title><style>${(appearance.css || "").replace(/<\/style/gi, "<\\/style")}
+${EXPORT_CSS}
+:root { --export-width: ${appearance.width || "808px"}; }
+</style></head><body class="${escapeHTML(appearance.bodyClass || "")}">
+<header class="export-header"><h1>${safeTitle}</h1><a href="${safeURL}" target="_blank" rel="noreferrer noopener">打开原对话</a></header>
+<div class="export-container"><main class="export-transcript ${escapeHTML(appearance.containerClass || "")}">${turns.join("\n")}</main></div></body></html>`;
   }
 
   async function createConversationHTML() {
@@ -391,8 +509,9 @@
     const title = document.title.trim() || "ChatGPT 对话";
     const turns = await collectConversation();
     if (currentConversationURL() !== sourceURL) throw new Error("页面已切换到其他对话，请重试");
+    const appearance = await captureAppearance();
     return {
-      html: buildHTML(title, sourceURL, turns),
+      html: buildHTML(title, sourceURL, turns, appearance),
       filename: filenameForTitle(title),
       turns: turns.length
     };
@@ -425,7 +544,7 @@
 
   globalThis.ChatEnhanceExport = {
     exportConversation, createConversationHTML, collectConversation, buildHTML,
-    downloadHTML, filenameForTitle
+    downloadHTML, filenameForTitle, captureAppearance, highlightStaticPython
   };
 
   if (globalThis.chrome?.runtime?.onMessage) {
