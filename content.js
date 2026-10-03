@@ -15,7 +15,7 @@
     chrome.storage.sync.get({ compactMath: true }, (settings) => {
       if (chrome.runtime.lastError) {
         console.warn(
-          "[ChatGPT Markdown Copy] Unable to read settings:",
+          "[Chat Enhance] Unable to read settings:",
           chrome.runtime.lastError.message
         );
         return;
@@ -212,7 +212,7 @@
       button.setAttribute("aria-label", "Markdown 已复制");
       showToast("Markdown 已复制");
     } catch (error) {
-      console.error("[ChatGPT Markdown Copy] Copy failed:", error);
+      console.error("[Chat Enhance] Copy failed:", error);
       button.classList.add("chat-enhance-copy--error");
       showToast(error.message || "复制失败", "error");
     } finally {
@@ -238,7 +238,7 @@
       button.setAttribute("aria-label", "Word 内容已复制");
       showToast("Word 内容已复制");
     } catch (error) {
-      console.error("[ChatGPT Markdown Copy] Word copy failed:", error);
+      console.error("[Chat Enhance] Word copy failed:", error);
       button.classList.add("chat-enhance-copy--error");
       showToast(error.message || "Word 复制失败", "error");
     } finally {

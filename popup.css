@@ -20,6 +20,47 @@ h1 {
   line-height: 1.3;
 }
 
+.export-button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: #10a37f;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.export-button:hover { background: #0c8b6c; }
+.export-button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.export-button:disabled { cursor: progress; opacity: .65; }
+
+.access-button {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #10a37f;
+  border-radius: 9px;
+  background: transparent;
+  color: #10a37f;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.access-button[hidden] { display: none; }
+
+.export-hint {
+  margin: 7px 0 17px;
+  color: GrayText;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .setting {
   display: flex;
   align-items: center;

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>对话导出测试</title>
+<style>
+  .thread-scroll-container { height: 180px; overflow-y: auto; }
+  [data-turn-key] { height: 320px; }
+</style>
+<svg hidden><symbol id="fixture-star"><path d="M0 0L4 4"/></symbol></svg>
+<div class="thread-scroll-container">
+  <div data-turn-key="second"></div>
+  <div data-turn-key="third"></div>
+</div>
+<button id="download-test" type="button">下载测试 HTML</button>
+<pre id="results">运行中</pre>
+<script>
+  const scroller = document.querySelector(".thread-scroll-container");
+  const blobImage = URL.createObjectURL(new Blob([
+    '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="3" fill="#10a37f"/></svg>'
+  ], { type: "image/svg+xml" }));
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = (url, options) => String(url).startsWith("blob:")
+    ? Promise.reject(new TypeError("Failed to fetch"))
+    : originalFetch(url, options);
+  const contents = {
+    first: '<div data-chatgpt-search-unit-key="first:user"><div data-content-search-unit-key="first:user">问题一</div></div>' +
+      '<div data-content-search-unit-key="first:assistant" data-chatgpt-search-unit-key="first:assistant"><p>回答一 <span data-math-source="x^2" data-math-display="false"><span class="katex"><math><msup><mi>x</mi><mn>2</mn></msup></math></span></span></p>' +
+      '<img alt="示意图" src="pixel.svg">' +
+      '<img alt="临时图片" src="' + blobImage + '">' +
+      '<script>window.exportUnsafe=true<\/script><button aria-label="复制">复制</button></div>',
+    second: '<div data-chatgpt-search-unit-key="second:user">问题二</div>' +
+      '<div data-content-search-unit-key="second:assistant"><table><tr><th>项目</th><th>值</th></tr><tr><td>A</td><td>2</td></tr></table>' +
+      '<span data-math-source="a+b" data-math-display="true">备用公式</span><svg><use href="#fixture-star"/></svg></div>',
+    third: '<div data-chatgpt-search-unit-key="third:user">问题三</div>' +
+      '<div data-content-search-unit-key="third:assistant"><p>回答三</p><div class="turn-action-controls"><button>复制回复</button></div></div>'
+  };
+  function renderVisible() {
+    const viewport = scroller.getBoundingClientRect();
+    for (const turn of scroller.children) {
+      const bounds = turn.getBoundingClientRect();
+      const visible = bounds.bottom > viewport.top - 60 && bounds.top < viewport.bottom + 60;
+      const index = { first: 0, second: 1, third: 2 }[turn.dataset.turnKey];
+      turn.innerHTML = visible
+        ? '<div data-content-search-turn-key="fallback-turn-' + index + '">' + contents[turn.dataset.turnKey] + '</div>'
+        : "";
+    }
+  }
+  scroller.addEventListener("scroll", renderVisible);
+  renderVisible();
+  // Older history appears after the exporter has already reached the initial top.
+  window.setTimeout(() => {
+    scroller.insertAdjacentHTML("afterbegin", '<div data-turn-key="first"></div>');
+    renderVisible();
+  }, 1800);
+</script>
+<script src="../vendor/katex/katex.min.js"></script>
+<script src="../export.js"></script>
+<script>
+  ChatEnhanceExport.collectConversation().then((turns) => {
+    const html = ChatEnhanceExport.buildHTML("对话导出测试", "https://chatgpt.com/c/example", turns);
+    document.querySelector("#download-test").addEventListener("click", () =>
+      ChatEnhanceExport.downloadHTML({ html, filename: "对话导出测试.html", turns: turns.length })
+    );
+    const offline = new DOMParser().parseFromString(html, "text/html");
+    const assertions = {
+      turns: turns.length,
+      userAndAssistant: offline.querySelectorAll(".message--user").length === 3 &&
+        offline.querySelectorAll(".message--assistant").length === 3 &&
+        offline.body.textContent.includes("问题一") && offline.body.textContent.includes("回答三"),
+      formula: offline.querySelectorAll("math").length === 2,
+      table: offline.querySelectorAll("table").length === 1,
+      imageEmbedded: offline.querySelectorAll("img").length === 2 &&
+        offline.querySelectorAll("img")[0].src.startsWith("data:image/svg+xml;base64,") &&
+        offline.querySelectorAll("img")[1].src.startsWith("data:image/png;base64,"),
+      unsafeRemoved: !html.includes("window.exportUnsafe") && !html.includes("turn-action-controls"),
+      symbolResolved: offline.querySelectorAll("svg g path").length === 1 && !offline.querySelector("svg use"),
+      filename: ChatEnhanceExport.filenameForTitle("测试/对话") === "测试 对话.html"
+    };
+    document.querySelector("#results").textContent = JSON.stringify(assertions);
+  }).catch((error) => {
+    document.querySelector("#results").textContent = `ERROR: ${error.message}`;
+  });
+</script>
+</html>
