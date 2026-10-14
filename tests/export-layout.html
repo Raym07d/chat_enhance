@@ -31,14 +31,14 @@
     : originalFetch(url, options);
   const contents = {
     first: '<div data-chatgpt-search-unit-key="first:user"><div data-content-search-unit-key="first:user">问题一</div></div>' +
-      '<div data-content-search-unit-key="first:assistant" data-chatgpt-search-unit-key="first:assistant"><p>回答一 <span data-math-source="x^2" data-math-display="false"><span class="katex"><math><msup><mi>x</mi><mn>2</mn></msup></math></span></span></p>' +
+      '<div data-content-search-unit-key="first:assistant" data-chatgpt-search-unit-key="first:assistant"><p>回答一 <span data-d-component="math"><span class="katex"><math><semantics><msup><mi>x</mi><mn>2</mn></msup><annotation encoding="application/x-tex">x^2</annotation></semantics></math></span></span></p>' +
       '<img alt="示意图" src="pixel.svg">' +
       '<img alt="临时图片" src="' + blobImage + '">' +
       '<script>window.exportUnsafe=true<\/script><button aria-label="复制">复制</button></div>',
     second: '<div data-chatgpt-search-unit-key="second:user">问题二</div>' +
       '<div data-content-search-unit-key="second:assistant"><table><tr><th>项目</th><th>值</th></tr><tr><td>A</td><td>2</td></tr></table>' +
       '<div class="code-frame"><div class="cm-editor"><div class="cm-content" contenteditable="true" style="tab-size: 4;"><div class="cm-line"><span class="text-codex-syntax-keyword">if</span> ready:</div><div class="cm-line">    export()</div><div class="cm-line"><br></div><div class="cm-line">done = True</div></div></div></div>' +
-      '<span data-math-source="a+b" data-math-display="true">备用公式</span><svg><use href="#fixture-star"/></svg></div>',
+      '<span data-d-component="math"><span class="katex-display"><span class="katex"><math display="block"><semantics><mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow><annotation encoding="application/x-tex">a+b</annotation></semantics></math></span></span></span><svg><use href="#fixture-star"/></svg></div>',
     third: '<div data-chatgpt-search-unit-key="third:user">问题三</div>' +
       '<div data-content-search-unit-key="third:assistant"><p>回答三</p><div class="turn-action-controls"><button>复制回复</button></div></div>'
   };
@@ -65,6 +65,7 @@
   }, 2600);
 </script>
 <script src="../vendor/katex/katex.min.js"></script>
+<script src="../math.js"></script>
 <script src="../export.js"></script>
 <script>
   ChatEnhanceExport.collectConversation().then(async (turns) => {

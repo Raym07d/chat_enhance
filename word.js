@@ -85,21 +85,13 @@
       const tag = element.tagName;
       if (SKIP_TAGS.has(tag) || element.getAttribute("role") === "button") return "";
 
-      if (element.hasAttribute("data-math-source")) {
-        const latex = element.getAttribute("data-math-source").trim();
-        if (!latex) throw new Error("发现没有源码的公式");
-        const display = element.getAttribute("data-math-display") === "true" ||
-          Boolean(element.querySelector(".katex-display")) ||
-          element.style.display === "block";
+      if (element.matches(globalThis.ChatEnhanceMath.SELECTOR) && !element.closest("pre, code")) {
+        const { tex: latex, display } = globalThis.ChatEnhanceMath.read(element);
+        if (!latex) throw new Error("发现无法读取源码的公式，请刷新页面或更新扩展");
         const mathML = latexToMathML(latex, display);
         return display
           ? `<div style="margin:8pt 0;text-align:center;">${mathML}</div>`
           : mathML;
-      }
-
-      if ((tag === "SPAN" && element.classList.contains("katex")) ||
-          tag === "MATH" || element.getAttribute("role") === "math") {
-        throw new Error("发现无法读取源码的公式，请刷新页面或更新扩展");
       }
 
       if (tag === "BR") return "<br>";

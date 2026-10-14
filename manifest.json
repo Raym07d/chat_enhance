@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chat Enhance",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Copy ChatGPT responses as Markdown or Word content and save complete conversations as offline HTML.",
   "permissions": [
     "clipboardWrite",
@@ -30,6 +30,7 @@
       ],
       "js": [
         "vendor/katex/katex.min.js",
+        "math.js",
         "markdown.js",
         "word.js",
         "export.js",

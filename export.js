@@ -143,29 +143,17 @@
   }
 
   function replaceMath(clone) {
-    const wrappers = Array.from(clone.querySelectorAll("[data-math-source], .katex"));
+    const wrappers = globalThis.ChatEnhanceMath.roots(clone);
     for (const wrapper of wrappers) {
       if (!wrapper.isConnected && !clone.contains(wrapper)) continue;
       if (wrapper.closest("pre, code")) continue;
-      if (wrapper.classList.contains("katex") && wrapper.closest("[data-math-source]")) continue;
-      let math = wrapper.querySelector("math");
-      if (!math && wrapper.hasAttribute("data-math-source") && globalThis.katex?.renderToString) {
-        const rendered = globalThis.katex.renderToString(wrapper.getAttribute("data-math-source"), {
-          output: "mathml", throwOnError: true, strict: "ignore", trust: false
-        });
-        const template = document.createElement("template");
-        template.innerHTML = rendered;
-        math = template.content.querySelector("math");
-      }
+      const { display, math } = globalThis.ChatEnhanceMath.read(wrapper);
       if (!math) {
         throw new Error("有公式无法离线保存，请刷新页面后重试");
       }
       // Keep KaTeX's visual tree when available; MathML remains for accessibility.
       if (wrapper.querySelector(".katex-html")) continue;
       const replacement = math.cloneNode(true);
-      const display = wrapper.getAttribute("data-math-display") === "true" ||
-        Boolean(wrapper.querySelector(".katex-display")) ||
-        math.getAttribute("display") === "block";
       replacement.setAttribute("display", display ? "block" : "inline");
       wrapper.replaceWith(replacement);
     }

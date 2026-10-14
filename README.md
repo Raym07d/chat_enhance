@@ -1,6 +1,6 @@
 # Chat Enhance
 
-一个无需构建的 Chrome/Edge Manifest V3 扩展。在 ChatGPT 每条回复的原生复制按钮旁增加“复制 Markdown”和“复制到 Word”按钮，并从页面 DOM 的 `data-math-source` 恢复原始 LaTeX。兼容新版 ChatGPT 回复容器与 `data-math-display` 公式节点。
+一个无需构建的 Chrome/Edge Manifest V3 扩展。在 ChatGPT 每条回复的原生复制按钮旁增加“复制 Markdown”和“复制到 Word”按钮，并从当前网页 KaTeX 的 `annotation[encoding="application/x-tex"]` 恢复原始 LaTeX。
 
 ## 安装
 
@@ -32,7 +32,7 @@
 点击浏览器工具栏中的扩展图标，可切换“合并公式内部换行”：
 
 - 默认开启：把公式源码中的真实换行安全转换成空格，提高 Markdown 编辑器兼容性。
-- 关闭：完整保留 `data-math-source` 中的内部换行。
+- 关闭：完整保留 LaTeX annotation 中的内部换行。
 
 LaTeX 的显式换行命令 `\\` 不受影响。设置通过浏览器同步存储保存，并在下次复制时立即生效，不需要刷新 ChatGPT 页面。
 
@@ -45,7 +45,7 @@ Word 公式转换使用随扩展本地打包的 KaTeX 0.18.7（MIT License），
 ## 已知限制
 
 - ChatGPT 改动回复操作栏结构后，复制按钮定位规则可能需要更新。
-- 公式从 ChatGPT 当前的 `[data-math-source]` 获取。如果发现公式节点却没有源码，扩展会明确报错，不会退回视觉文字并静默产生损坏结果。
+- 公式从 ChatGPT 当前的 KaTeX LaTeX annotation 获取。如果发现公式节点却没有源码，扩展会明确报错，不会退回视觉文字并静默产生损坏结果。
 - Word 粘贴为原生公式需要支持 MathML 导入的 Microsoft 365 Word；较旧版本可能把公式作为普通内容处理。
 - 复杂的交互式组件、图表和 Canvas 无法完整转换为 Markdown。
 - HTML 导出会保存页面可读取的图片与 Canvas 快照；无法读取的媒体会提示失败。视频、音频和交互式应用不会进入离线文件。

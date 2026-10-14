@@ -76,25 +76,11 @@
   function replaceMath(root, options) {
     const documentRef = root.ownerDocument;
 
-    // ChatGPT keeps the original TeX on an outer wrapper. Recent versions
-    // use data-math-display without role="math".
-    for (const wrapper of Array.from(root.querySelectorAll("[data-math-source]"))) {
-      if (wrapper.closest("pre, code")) continue;
-      const source = wrapper.getAttribute("data-math-source");
-      const tex = options.compactMath
-        ? compactMathNewlines(source)
-        : cleanTex(source);
-      if (!tex) continue;
-      const display = wrapper.getAttribute("data-math-display") === "true" ||
-        Boolean(wrapper.querySelector(".katex-display")) ||
-        wrapper.style.display === "block";
+    for (const wrapper of globalThis.ChatEnhanceMath.roots(root)) {
+      const { tex: source, display } = globalThis.ChatEnhanceMath.read(wrapper);
+      if (!source) throw new Error("发现无法读取源码的公式，请刷新页面或更新扩展");
+      const tex = options.compactMath ? compactMathNewlines(source) : cleanTex(source);
       wrapper.replaceWith(makeMathPlaceholder(documentRef, tex, display));
-    }
-
-    const unresolvedMath = Array.from(root.querySelectorAll('[role="math"], .katex, math'))
-      .find((element) => !element.closest("pre, code, [data-chat-enhance-math]"));
-    if (unresolvedMath) {
-      throw new Error("发现无法读取源码的公式，请刷新页面或更新扩展");
     }
   }
 
@@ -142,7 +128,10 @@
         .filter((cell) => cell.matches("th, td"))
         .map((cell) =>
           serializeChildren(cell)
-            .replace(/\|/g, "\\|")
+            .trim()
+            .replace(/(\\*)\|/g, (match, slashes) =>
+              slashes.length % 2 ? match : `${slashes}\\|`
+            )
             .replace(/\n+/g, "<br>")
             .trim()
         )

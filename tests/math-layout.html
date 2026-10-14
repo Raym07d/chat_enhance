@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Current ChatGPT math regression</title>
+<div id="response" data-markdown-text-style="assistant-message"></div>
+<pre id="results">Running</pre>
+<script src="../vendor/katex/katex.min.js"></script>
+<script src="../math.js"></script>
+<script src="../markdown.js"></script>
+<script src="../word.js"></script>
+<script>
+  const source = String.raw`\boxed{\nF|_M=f,\qquad \|F\|=\|f\|\n}`.replace(/\\n/g, '\n');
+  function formula(tex, display) {
+    const element = document.createElement('span');
+    element.dataset.dComponent = 'math';
+    element.innerHTML = katex.renderToString(tex, { displayMode: display, output: 'htmlAndMathml' });
+    return element;
+  }
+  const root = document.querySelector('#response');
+  root.append('条件 ', formula(String.raw`M\subseteq X`, false), ' 得到 ', formula(source, true));
+  const raw = ChatEnhanceMarkdown.responseToMarkdown(root, {compactMath: false});
+  const compact = ChatEnhanceMarkdown.responseToMarkdown(root);
+  const word = new DOMParser().parseFromString(ChatEnhanceWord.responseToWordHTML(root), 'text/html');
+  const code = document.createElement('pre');
+  code.append(formula('x^2', false));
+  const missing = document.createElement('div');
+  missing.innerHTML = '<span data-d-component="math"><span class="katex">x</span></span>';
+  let rejected = false;
+  try { ChatEnhanceMarkdown.responseToMarkdown(missing); } catch { rejected = true; }
+  const table = document.createElement('div');
+  table.innerHTML = '<table><tr><th>表达式</th></tr><tr><td><p></p></td></tr></table>';
+  table.querySelector('td p').append(formula(String.raw`\|F\|=\|f\|,\quad F|_M=f`, false));
+  const tableMarkdown = ChatEnhanceMarkdown.responseToMarkdown(table);
+  const assertions = {
+    tableNormUnchanged: tableMarkdown.includes(String.raw`\|F\|=\|f\|,\quad F\|_M=f`),
+    tableNoExtraBreaks: !tableMarkdown.includes('<br>'),
+    twoRoots: ChatEnhanceMath.roots(root).length === 2,
+    inlineTex: raw.includes(String.raw`$M\subseteq X$`),
+    displayTex: raw.includes('$$\n' + source + '\n$$'),
+    compactTex: compact.includes(ChatEnhanceMarkdown.compactMathNewlines(source)),
+    wordMath: word.querySelectorAll('math').length === 2,
+    wordInline: word.querySelector('math').getAttribute('display') === 'inline',
+    wordDisplay: word.querySelectorAll('math')[1].getAttribute('display') === 'block',
+    wordPresentation: !word.querySelector('annotation, semantics'),
+    ignoreCode: ChatEnhanceMath.roots(code).length === 0,
+    missingSourceRejected: rejected,
+    visualNotCopied: !raw.includes('katex') && !raw.includes('⊆')
+  };
+  document.querySelector('#results').textContent = JSON.stringify(assertions);
+  if (Object.values(assertions).some(value => !value)) throw Error('Math regression failed');
+</script>
