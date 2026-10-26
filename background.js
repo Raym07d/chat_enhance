@@ -32,7 +32,7 @@ async function imageAsDataURL(url) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== "chat-enhance-read-image") return false;
   (async () => {
-    if (!sender.tab || !/^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(sender.url || "")) {
+    if (!sender.tab || !/^https:\/\/chatgpt\.com\//.test(sender.url || "")) {
       throw new Error("图片请求来源无效");
     }
     const origin = imageOrigin(message.url);

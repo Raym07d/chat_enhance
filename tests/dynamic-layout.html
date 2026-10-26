@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Semantic reply lookup and replaced DOM regression</title>
+<div id="fixtures"></div>
+<pre id="results">Running</pre>
+<script>
+  const writes = [];
+  navigator.clipboard.writeText = async text => writes.push({text});
+  navigator.clipboard.write = async items => writes.push({html:await (await items[0].getType('text/html')).text()});
+  const turns = [];
+  for (let i=0; i<3; i++) {
+    const turn=document.createElement(i===2?'article':'div');
+    if(i!==2) turn.dataset.turnKey='turn-'+i;
+    const unitAttribute=i===2?'':'data-content-search-unit-key="turn:assistant"';
+    const contentAttribute=i===0?'data-markdown-text-style="assistant-message"':'';
+    turn.innerHTML='<div data-content-search-unit-key="turn:user"><button aria-label="Copy">Copy user</button></div>' +
+      '<div data-reply-slot '+unitAttribute+'><h4 data-conversation-role="assistant">ChatGPT:</h4><div data-body '+contentAttribute+'>before-'+i+'<div data-markdown-copy="code-block"><code>x = 1</code><button aria-label="Copy">Copy code</button></div></div></div>' +
+      '<div class="random-new-action-style-'+i+'"><button aria-label="Copy response">Copy response</button></div>';
+    document.querySelector('#fixtures').append(turn);turns.push(turn);
+  }
+</script>
+<script src="../math.js"></script>
+<script src="../markdown.js"></script>
+<script src="../word.js"></script>
+<script src="../content.js"></script>
+<script>
+(async()=>{
+  const assertions = {semanticVariants:true, freshMarkdown:true, freshWord:true, noWrongCopyButtons:true};
+  for(const [i,turn] of turns.entries()) {
+    assertions.semanticVariants &&= !!turn.querySelector('[data-chat-enhance-copy-markdown]') && !!turn.querySelector('[data-chat-enhance-copy-word]');
+    assertions.noWrongCopyButtons &&= turn.querySelectorAll('[data-chat-enhance-copy-markdown]').length===1;
+    const old=turn.querySelector('[data-reply-slot]'), fresh=old.cloneNode(true);
+    fresh.querySelector('[data-body]').textContent='after-'+i;
+    old.replaceWith(fresh);old.replaceChildren();
+    const count=writes.length;
+    turn.querySelector('[data-chat-enhance-copy-markdown]').click();
+    for(let n=0;n<10&&writes.length===count;n++) await new Promise(requestAnimationFrame);
+    assertions.freshMarkdown &&= writes[count]?.text==='after-'+i;
+    turn.querySelector('[data-chat-enhance-copy-word]').click();
+    for(let n=0;n<10&&writes.length===count+1;n++) await new Promise(requestAnimationFrame);
+    assertions.freshWord &&= writes[count+1]?.html.includes('after-'+i) && !writes[count+1]?.html.includes('before-');
+  }
+  const last=turns.at(-1), count=writes.length;
+  last.querySelector('[data-body]').replaceChildren();
+  for (const selector of ['[data-chat-enhance-copy-markdown]','[data-chat-enhance-copy-word]']) {
+    const button=last.querySelector(selector);button.disabled=false;button.click();
+    await new Promise(requestAnimationFrame);
+  }
+  assertions.loadingDoesNotCopyEmpty = writes.length === count;
+  document.querySelector('#results').textContent=JSON.stringify(assertions);
+  if(Object.values(assertions).some(x=>!x)) throw Error('Dynamic DOM regression failed');
+})().catch(error=>{document.querySelector('#results').textContent='ERROR: '+error.message;throw error;});
+</script>

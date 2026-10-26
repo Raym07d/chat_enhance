@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Current code pane copying regression</title>
+<pre id="results">Running</pre>
+<script src="../math.js"></script>
+<script src="../markdown.js"></script>
+<script src="../word.js"></script>
+<script>
+  function pane() {
+    const root = document.createElement('div');
+    root.innerHTML = '<div data-code-block="true" data-markdown-copy="code-block"><div data-markdown-copy="exclude"><div class="truncate">Python</div><button>运行</button></div><code></code></div>';
+    return root;
+  }
+  const text = 'if ready:\n    print("<ok>")  \n\n\n\n\tfinish()\n';
+  const root = pane();
+  root.querySelector('code').textContent = text;
+  const md = ChatEnhanceMarkdown.responseToMarkdown(root);
+  const word = new DOMParser().parseFromString(ChatEnhanceWord.responseToWordHTML(root), 'text/html');
+  const editor = pane();
+  editor.querySelector('code').outerHTML = '<div class="cm-content" data-language="python"><div class="cm-line">if ready:</div><div class="cm-line">    run()</div><div class="cm-line"><br></div><div class="cm-line">\tfinish()</div></div>';
+  const editorText = 'if ready:\n    run()\n\n\tfinish()';
+  const breaks = pane();
+  breaks.querySelector('code').innerHTML = 'a = 1<br><br>    b = 2';
+  const fence = pane();
+  fence.querySelector('code').textContent = 'print("```")';
+  const nested = document.createElement('div');
+  nested.innerHTML = '<ul><li>示例</li></ul>';
+  nested.querySelector('li').append(editor.firstChild.cloneNode(true));
+  const native = document.createElement('div');
+  native.innerHTML = '<pre><code class="language-python"></code></pre>';
+  native.querySelector('code').textContent = text;
+  const quote = document.createElement('div');
+  quote.innerHTML = '<blockquote></blockquote>';
+  quote.firstChild.append(editor.firstChild.cloneNode(true));
+  const listOnly = document.createElement('div');
+  listOnly.innerHTML = '<ol><li></li></ol>';
+  listOnly.querySelector('li').append(editor.firstChild.cloneNode(true));
+  const incomplete = editor.cloneNode(true);
+  incomplete.querySelector('.cm-content').insertAdjacentHTML('beforeend', '<div class="cm-gap"></div>');
+  let rejected = false;
+  try { ChatEnhanceMarkdown.responseToMarkdown(incomplete); } catch { rejected = true; }
+  const assertions = {
+    staticFenceAndIndent: md === '```python\n' + text + '```',
+    noControlsCopied: !md.includes('运行'),
+    wordPre: word.querySelectorAll('pre').length === 1,
+    wordExactText: word.querySelector('pre').textContent === text,
+    editorExactLines: ChatEnhanceMarkdown.responseToMarkdown(editor) === '```python\n' + editorText + '\n```',
+    editorWordExact: new DOMParser().parseFromString(ChatEnhanceWord.responseToWordHTML(editor), 'text/html').querySelector('pre').textContent === editorText,
+    breakNodes: ChatEnhanceMarkdown.responseToMarkdown(breaks).includes('a = 1\n\n    b = 2'),
+    fenceDelimiter: ChatEnhanceMarkdown.responseToMarkdown(fence) === '````python\nprint("```")\n````',
+    nestedIndent: ChatEnhanceMarkdown.responseToMarkdown(nested).includes('  ```python\n  if ready:\n      run()\n  \n  \tfinish()\n  ```'),
+    nativeExact: ChatEnhanceMarkdown.responseToMarkdown(native) === md,
+    quotePrefix: ChatEnhanceMarkdown.responseToMarkdown(quote).includes('> ```python\n> if ready:\n>     run()\n> \n> \tfinish()\n> ```'),
+    listOnlyIndent: ChatEnhanceMarkdown.responseToMarkdown(listOnly).includes('1. ```python\n   if ready:\n       run()\n   \n   \tfinish()\n   ```'),
+    missingLinesRejected: rejected
+  };
+  document.querySelector('#results').textContent = JSON.stringify(assertions);
+  if (Object.values(assertions).some(x => !x)) throw Error('Code regression failed');
+</script>

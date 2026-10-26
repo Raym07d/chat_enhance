@@ -9,7 +9,7 @@
     return candidates.filter((element) => {
       const parent = element.parentElement?.closest(SELECTOR);
       return !parent || !root.contains(parent);
-    }).filter((element) => !element.closest("pre, code"));
+    }).filter((element) => !element.closest('pre, code, [data-markdown-copy="code-block"]'));
   }
 
   function read(element) {

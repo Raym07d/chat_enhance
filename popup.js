@@ -41,7 +41,7 @@
     showStatus("正在读取并保存当前对话…", 0);
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id || !/^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(tab.url || "")) {
+      if (!tab?.id || !/^https:\/\/chatgpt\.com\//.test(tab.url || "")) {
         throw new Error("请先打开一条 ChatGPT 对话");
       }
       const result = await chrome.tabs.sendMessage(tab.id, { type: "chat-enhance-export-html" });

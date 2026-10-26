@@ -111,6 +111,30 @@
     return `\n\n${fence}${language || ""}\n${text}\n${fence}\n\n`;
   }
 
+  function readCodeBlock(element) {
+    const editor = element.querySelector(".cm-content");
+    const code = element.querySelector("code");
+    const lines = editor ? Array.from(editor.querySelectorAll(".cm-line")) : [];
+    let text;
+    if (lines.length && !element.querySelector(".cm-gap")) {
+      text = lines.map((line) => line.textContent).join("\n");
+    } else if (code || element.tagName === "PRE") {
+      const clone = (code || element).cloneNode(true);
+      for (const br of clone.querySelectorAll("br")) br.replaceWith("\n");
+      text = clone.textContent;
+    } else {
+      throw new Error("代码块尚未完整加载，请展开代码块后重试");
+    }
+    const header = element.querySelector('[data-markdown-copy="exclude"]');
+    const labelNode = Array.from(header?.children || []).find((child) =>
+      !child.matches("svg, button") && !child.querySelector("button, [role='button']")
+    );
+    const label = editor?.getAttribute("data-language") || code?.getAttribute("data-language") ||
+      code?.className.match(/(?:language-|lang-)([\w#+.-]+)/i)?.[1] || labelNode?.textContent || "";
+    const language = label.trim().toLowerCase();
+    return { text: normalizeNewlines(text), language: /^[\w#+.-]+$/.test(language) ? language : "" };
+  }
+
   function indentLines(value, prefix) {
     return value
       .replace(/^\n+|\n+$/g, "")
@@ -154,6 +178,12 @@
   }
 
   function serialize(root) {
+    const codeBlocks = [];
+    const marker = `\uE000${crypto.randomUUID()}:`;
+    function fencedCode(text, language) {
+      const index = codeBlocks.push(codeFence(text, language).slice(2, -2)) - 1;
+      return `\n\n${marker}${index}\uE001\n\n`;
+    }
     function children(node, context = {}) {
       return Array.from(node.childNodes).map((child) => visit(child, context)).join("");
     }
@@ -188,11 +218,16 @@
       if (tag === "EM" || tag === "I") return `*${children(element)}*`;
       if (tag === "S" || tag === "DEL") return `~~${children(element)}~~`;
 
+      if (element.matches('[data-markdown-copy="code-block"]')) {
+        const { text, language } = readCodeBlock(element);
+        return fencedCode(text, language);
+      }
+
       if (tag === "PRE") {
         const code = element.querySelector("code") || element;
         const className = code.getAttribute("class") || "";
         const match = className.match(/(?:language-|lang-)([\w#+.-]+)/i);
-        return codeFence(code.textContent, match ? match[1] : "");
+        return fencedCode(readCodeBlock(element).text, match ? match[1] : "");
       }
 
       if (tag === "CODE") return inlineCode(element.textContent);
@@ -239,19 +274,20 @@
 
     return children(root)
       .replace(/[ \t]+\n/g, "\n")
-      .replace(/\n[ \t]+/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
-      .trim();
+      .trim()
+      .replace(new RegExp(`(^[\\t ]*(?:>[\\t ]*)*(?:(?:[-+*]|\\d+\\.)[\\t ]+)?)?${marker}(\\d+)\uE001`, "gm"), (_match, prefix, index) => {
+        const block = codeBlocks[Number(index)];
+        const continuation = prefix?.replace(/(?:[-+*]|\d+\.)[\t ]+$/, (listMarker) => " ".repeat(listMarker.length));
+        return prefix ? prefix + block.replace(/\n/g, `\n${continuation}`) : block;
+      });
   }
 
   function findResponseContent(message) {
-    return (
-      message.querySelector('[data-markdown-text-style="assistant-message"]') ||
-      message.querySelector("[data-message-content]") ||
-      message.querySelector(".markdown") ||
-      message.querySelector("[class*='markdown']") ||
-      message
-    );
+    const selector = '[data-markdown-text-style="assistant-message"]';
+    if (message.matches(selector)) return message;
+    return message.querySelector(selector) ||
+      message.querySelector('[data-conversation-role="assistant"]')?.nextElementSibling || message;
   }
 
   function responseToMarkdown(message, options = {}) {
@@ -272,6 +308,8 @@
   globalThis.ChatEnhanceMarkdown = {
     cleanTex,
     compactMathNewlines,
+    readCodeBlock,
+    findResponseContent,
     responseToMarkdown
   };
 })();

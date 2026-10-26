@@ -3,12 +3,7 @@
 
   const MARKDOWN_BUTTON_ATTRIBUTE = "data-chat-enhance-copy-markdown";
   const WORD_BUTTON_ATTRIBUTE = "data-chat-enhance-copy-word";
-  const MESSAGE_SELECTOR = '[data-message-author-role="assistant"]';
-  const CURRENT_MESSAGE_SELECTOR = '[data-content-search-unit-key$=":assistant"]';
-  const COPY_TEST_IDS = new Set([
-    "copy-turn-action-button",
-    "copy-response-button"
-  ]);
+  const MESSAGE_SELECTOR = '[data-content-search-unit-key$=":assistant"]';
   let compactMathEnabled = true;
 
   if (globalThis.chrome?.storage?.sync) {
@@ -43,49 +38,32 @@
   }
 
   function responseContent(message) {
-    return message.querySelector(
-      '[data-markdown-text-style="assistant-message"], .markdown, [data-message-content], [class*="markdown"]'
-    );
+    return globalThis.ChatEnhanceMarkdown.findResponseContent(message);
   }
 
   function resolveAssistantMessage(button) {
     const direct = button.closest(MESSAGE_SELECTOR);
     if (direct) return direct;
 
-    // Current ChatGPT turns contain both the user prompt and assistant reply.
-    // The action bar is a sibling of the reply, so stay inside this turn.
-    const actionBar = button.closest(".turn-action-controls");
-    const currentTurn = actionBar?.closest("[data-turn-key]");
-    const currentMessage = currentTurn?.querySelector(CURRENT_MESSAGE_SELECTOR);
-    if (currentMessage?.querySelector('[data-markdown-text-style="assistant-message"]')) {
-      return currentMessage;
-    }
-
-    const turn = button.closest(
-      'article[data-turn="assistant"], article[data-testid^="conversation-turn"], [data-turn="assistant"], [data-testid^="conversation-turn"]'
-    );
+    // Restrict lookup to this turn, independent of action-bar styling. Re-resolve
+    // on every click: the virtualizer can replace the reply and reuse its buttons.
+    const turn = button.closest("[data-turn-key], article");
     if (!turn) return null;
-    return turn.querySelector(MESSAGE_SELECTOR);
+    return turn.querySelector(MESSAGE_SELECTOR) ||
+      turn.querySelector('[data-conversation-role="assistant"]')?.nextElementSibling || null;
   }
 
   function isNativeResponseCopyButton(button) {
     if (!(button instanceof HTMLButtonElement)) return false;
     if (button.hasAttribute(MARKDOWN_BUTTON_ATTRIBUTE) ||
         button.hasAttribute(WORD_BUTTON_ATTRIBUTE)) return false;
-    if (button.closest("pre, code")) return false;
-
-    const testId = button.getAttribute("data-testid") || "";
-    if (COPY_TEST_IDS.has(testId)) return true;
+    if (button.closest('pre, code, [data-markdown-copy="code-block"], [data-content-search-unit-key$=":user"], [data-chatgpt-search-unit-key$=":user"]')) return false;
 
     const label = normalizedLabel(button);
     const matchesCopy = /(^|\s)(copy|复制)(\s|$)/i.test(label) ||
       label.includes("copy response") ||
       label.includes("复制回复");
     if (!matchesCopy) return false;
-
-    if (button.closest(".turn-action-controls")) {
-      return Boolean(resolveAssistantMessage(button));
-    }
 
     // Avoid copy buttons that belong to code blocks or other nested widgets.
     const message = resolveAssistantMessage(button);
@@ -168,7 +146,7 @@
   }
 
   async function writeClipboard(text) {
-    if (!text) throw new Error("没有可复制的回复内容");
+    if (!text) throw new Error("回复仍在加载，请稍后再复制");
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
@@ -204,6 +182,7 @@
     button.disabled = true;
 
     try {
+      if (!message?.isConnected) throw new Error("没有找到当前回复，请刷新页面后重试");
       const markdown = globalThis.ChatEnhanceMarkdown.responseToMarkdown(message, {
         compactMath: compactMathEnabled
       });
@@ -229,10 +208,12 @@
     button.disabled = true;
 
     try {
+      if (!message?.isConnected) throw new Error("没有找到当前回复，请刷新页面后重试");
       const html = globalThis.ChatEnhanceWord.responseToWordHTML(message);
       const plainText = globalThis.ChatEnhanceMarkdown.responseToMarkdown(message, {
         compactMath: compactMathEnabled
       });
+      if (!plainText) throw new Error("回复仍在加载，请稍后再复制");
       await writeWordClipboard(html, plainText);
       button.classList.add("chat-enhance-copy--done");
       button.setAttribute("aria-label", "Word 内容已复制");
@@ -286,7 +267,7 @@
         "复制 Markdown",
         "chat-enhance-copy--markdown",
         createMarkdownIcon(),
-        (button) => copyMessage(message, button)
+        (button) => copyMessage(resolveAssistantMessage(button), button)
       );
       nativeButton.insertAdjacentElement("afterend", markdownButton);
     }
@@ -298,7 +279,7 @@
         "复制到 Word",
         "chat-enhance-copy--word",
         createWordIcon(),
-        (button) => copyMessageToWord(message, button)
+        (button) => copyMessageToWord(resolveAssistantMessage(button), button)
       );
       markdownButton.insertAdjacentElement("afterend", wordButton);
     }

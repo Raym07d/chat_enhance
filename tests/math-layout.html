@@ -30,6 +30,11 @@
   table.innerHTML = '<table><tr><th>表达式</th></tr><tr><td><p></p></td></tr></table>';
   table.querySelector('td p').append(formula(String.raw`\|F\|=\|f\|,\quad F|_M=f`, false));
   const tableMarkdown = ChatEnhanceMarkdown.responseToMarkdown(table);
+  const semanticOnly = root.cloneNode(true);
+  for (const element of semanticOnly.querySelectorAll('*')) {
+    element.removeAttribute('data-d-component');
+    element.removeAttribute('class');
+  }
   const assertions = {
     tableNormUnchanged: tableMarkdown.includes(String.raw`\|F\|=\|f\|,\quad F\|_M=f`),
     tableNoExtraBreaks: !tableMarkdown.includes('<br>'),
@@ -43,7 +48,8 @@
     wordPresentation: !word.querySelector('annotation, semantics'),
     ignoreCode: ChatEnhanceMath.roots(code).length === 0,
     missingSourceRejected: rejected,
-    visualNotCopied: !raw.includes('katex') && !raw.includes('⊆')
+    visualNotCopied: !raw.includes('katex') && !raw.includes('⊆'),
+    nativeMathWithoutClasses: ChatEnhanceMarkdown.responseToMarkdown(semanticOnly, {compactMath:false}) === raw
   };
   document.querySelector('#results').textContent = JSON.stringify(assertions);
   if (Object.values(assertions).some(value => !value)) throw Error('Math regression failed');

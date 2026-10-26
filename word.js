@@ -18,6 +18,10 @@
     return "";
   }
 
+  function codeBlockHTML(text) {
+    return `<pre style="margin:8pt 0;padding:8pt;background:#f3f4f6;border:1px solid #e5e7eb;font-family:Consolas,Menlo,monospace;white-space:pre-wrap;">${escapeHTML(text)}</pre>`;
+  }
+
   function presentationOnly(math) {
     for (const annotation of Array.from(
       math.querySelectorAll("annotation, annotation-xml")
@@ -60,18 +64,8 @@
     return math.outerHTML;
   }
 
-  function findResponseContent(message) {
-    return (
-      message.querySelector('[data-markdown-text-style="assistant-message"]') ||
-      message.querySelector("[data-message-content]") ||
-      message.querySelector(".markdown") ||
-      message.querySelector("[class*='markdown']") ||
-      message
-    );
-  }
-
   function responseBodyToWordHTML(message) {
-    const source = findResponseContent(message);
+    const source = globalThis.ChatEnhanceMarkdown.findResponseContent(message);
 
     function children(node) {
       return Array.from(node.childNodes).map(visit).join("");
@@ -84,6 +78,10 @@
       const element = node;
       const tag = element.tagName;
       if (SKIP_TAGS.has(tag) || element.getAttribute("role") === "button") return "";
+
+      if (element.matches('[data-markdown-copy="code-block"]')) {
+        return codeBlockHTML(globalThis.ChatEnhanceMarkdown.readCodeBlock(element).text);
+      }
 
       if (element.matches(globalThis.ChatEnhanceMath.SELECTOR) && !element.closest("pre, code")) {
         const { tex: latex, display } = globalThis.ChatEnhanceMath.read(element);
@@ -104,7 +102,7 @@
       if (tag === "SUP" || tag === "SUB") return `<${tag.toLowerCase()}>${children(element)}</${tag.toLowerCase()}>`;
 
       if (tag === "PRE") {
-        return `<pre style="margin:8pt 0;padding:8pt;background:#f3f4f6;border:1px solid #e5e7eb;font-family:Consolas,Menlo,monospace;white-space:pre-wrap;">${escapeHTML(element.textContent)}</pre>`;
+        return codeBlockHTML(globalThis.ChatEnhanceMarkdown.readCodeBlock(element).text);
       }
       if (tag === "CODE") {
         return `<code style="font-family:Consolas,Menlo,monospace;background:#f3f4f6;">${escapeHTML(element.textContent)}</code>`;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chat Enhance",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Copy ChatGPT responses as Markdown or Word content and save complete conversations as offline HTML.",
   "permissions": [
     "clipboardWrite",
@@ -16,7 +16,6 @@
   },
   "host_permissions": [
     "https://chatgpt.com/*",
-    "https://chat.openai.com/*",
     "https://t0.gstatic.com/*"
   ],
   "optional_host_permissions": [
@@ -25,8 +24,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://chatgpt.com/*",
-        "https://chat.openai.com/*"
+        "https://chatgpt.com/*"
       ],
       "js": [
         "vendor/katex/katex.min.js",

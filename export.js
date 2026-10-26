@@ -107,7 +107,7 @@
 
   function currentConversationURL() {
     const url = new URL(location.href);
-    if (!(["chatgpt.com", "chat.openai.com"].includes(url.hostname) &&
+    if (!(url.hostname === "chatgpt.com" &&
           /^\/(?:g\/[^/]+\/)?c\/[^/]+\/?$/.test(url.pathname))) {
       throw new Error("请先打开一条 ChatGPT 对话");
     }
@@ -126,20 +126,15 @@
 
   function turnRoots() {
     const units = Array.from(document.querySelectorAll(UNIT_SELECTOR));
-    if (units.length) {
-      return Array.from(new Set(units.map((unit) =>
-        unit.closest("[data-turn-key], article") || unit
-      )));
-    }
-    return Array.from(document.querySelectorAll('[data-message-author-role="user"], [data-message-author-role="assistant"]'));
+    return Array.from(new Set(units.map((unit) =>
+      unit.closest("[data-turn-key], article") || unit
+    )));
   }
 
   function roleForUnit(unit) {
     const key = unit.getAttribute("data-content-search-unit-key") ||
       unit.getAttribute("data-chatgpt-search-unit-key") || "";
-    return key.endsWith(":user") || unit.getAttribute("data-message-author-role") === "user"
-      ? "user"
-      : "assistant";
+    return key.endsWith(":user") ? "user" : "assistant";
   }
 
   function replaceMath(clone) {
@@ -373,7 +368,7 @@
     sanitize(clone);
     clone.classList.add("turn");
     const candidates = [clone, ...clone.querySelectorAll(UNIT_SELECTOR)]
-      .filter((unit) => unit.matches(UNIT_SELECTOR) || unit.hasAttribute("data-message-author-role"));
+      .filter((unit) => unit.matches(UNIT_SELECTOR));
     for (const unit of candidates.filter((unit) => !candidates.some((parent) => parent !== unit && parent.contains(unit)))) {
       unit.classList.add("message", `message--${roleForUnit(unit)}`);
     }
@@ -407,10 +402,8 @@
       const pending = [];
       for (const root of roots) {
         const key = root.getAttribute("data-turn-key") ||
-          root.getAttribute("data-message-id") ||
           root.getAttribute("data-content-search-unit-key") ||
-          root.getAttribute("data-chatgpt-search-unit-key") ||
-          root.getAttribute("data-testid");
+          root.getAttribute("data-chatgpt-search-unit-key");
         if (!key) continue;
         if (collected.has(key)) continue;
         const capture = captureTurn(root, cache);
