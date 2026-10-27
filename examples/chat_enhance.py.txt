@@ -1,0 +1,95 @@
+"""Python client for Chat Enhance. Requires Python 3.10+ and websockets >= 14."""
+import argparse
+import json
+import re
+import sys
+import time
+from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+from websockets.sync.client import connect
+
+
+def export_chatgpt(url, *, extension_id, port=9222, timeout=300):
+    """Return {html, filename, turns, warnings} for one already-open conversation.
+
+    The same Chrome profile must have Chat Enhance.
+    Only this call's temporary API tab is closed. Call serially per conversation.
+    A client timeout does not cancel an export already running in the extension.
+    """
+    source = urlsplit(url) if isinstance(url, str) else None
+    if not source or source.scheme != "https" or source.netloc != "chatgpt.com" or not re.fullmatch(r"/(?:g/[^/]+/)?c/[^/]+/?", source.path):
+        raise ValueError("需要完整的 ChatGPT 对话 URL")
+    if not isinstance(extension_id, str) or not re.fullmatch(r"[a-p]{32}", extension_id):
+        raise ValueError("Invalid Chrome extension ID")
+    if not 0 < timeout <= 600:
+        raise ValueError("timeout must be between 0 and 600 seconds")
+    base = f"http://127.0.0.1:{int(port)}"
+    deadline = time.monotonic() + timeout
+
+    def request(path, method="GET"):
+        with urlopen(Request(base + path, method=method), timeout=5) as response:
+            return response.read()
+
+    target = json.loads(request(f"/json/new?chrome-extension://{extension_id}/api.html", "PUT"))
+    try:
+        with connect(target["webSocketDebuggerUrl"], open_timeout=5, close_timeout=1,
+                     max_size=None) as socket:
+            sequence = 0
+
+            def evaluate(expression):
+                nonlocal sequence
+                sequence += 1
+                socket.send(json.dumps({"id": sequence, "method": "Runtime.evaluate", "params": {
+                    "expression": expression, "awaitPromise": True, "returnByValue": True
+                }}))
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("Chat Enhance export timed out")
+                    reply = json.loads(socket.recv(timeout=remaining))
+                    if reply.get("id") == sequence:
+                        break
+                if "error" in reply:
+                    raise RuntimeError(reply["error"]["message"])
+                result = reply["result"]
+                if "exceptionDetails" in result:
+                    detail = result["exceptionDetails"]
+                    raise RuntimeError(detail.get("exception", {}).get("description", detail["text"]))
+                return result["result"].get("value")
+
+            while not evaluate("typeof exportChatGPT === 'function'"):
+                if evaluate("location.protocol === 'chrome-error:'"):
+                    raise RuntimeError("Chrome blocked the API page; enable/reload Chat Enhance and check extension_id")
+                if time.monotonic() + 0.1 >= deadline:
+                    raise TimeoutError("API unavailable; reload Chat Enhance and check extension_id")
+                time.sleep(0.1)
+            result = evaluate(f"exportChatGPT({json.dumps(url)})")
+            expected = {"html": str, "filename": str, "turns": int, "warnings": list}
+            if not isinstance(result, dict) or any(not isinstance(result.get(key), kind) for key, kind in expected.items()):
+                raise RuntimeError("扩展返回结果不完整，请重新加载扩展并刷新对话")
+            return result
+    finally:
+        failed = sys.exc_info()[0] is not None
+        try:
+            request(f"/json/close/{target['id']}")
+        except HTTPError as error:
+            if error.code != 404 and not failed:
+                raise
+        except Exception:
+            if not failed:
+                raise
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("url")
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--extension-id", required=True)
+    parser.add_argument("--port", type=int, default=9222)
+    args = parser.parse_args()
+    result = export_chatgpt(args.url, extension_id=args.extension_id, port=args.port)
+    args.output.write_text(result["html"], encoding="utf-8")
+    print(json.dumps({"path": str(args.output.resolve()), "turns": result["turns"]}, ensure_ascii=False))

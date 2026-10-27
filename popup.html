@@ -1,29 +1,37 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Chat Enhance</title>
-    <link rel="stylesheet" href="popup.css">
-  </head>
-  <body>
-    <main>
-      <h1>Chat Enhance</h1>
-      <button id="export-html" class="export-button" type="button">保存当前对话为 HTML</button>
-      <button id="grant-image-access" class="access-button" type="button" hidden></button>
-      <p class="export-hint">保存完整对话、公式和图片，供离线查看。</p>
-      <label class="setting" for="compact-math">
-        <span class="setting__copy">
-          <strong>合并公式内部换行</strong>
-          <span>提高不同 Markdown 编辑器的公式兼容性</span>
-        </span>
-        <span class="switch">
-          <input id="compact-math" type="checkbox">
-          <span class="switch__track" aria-hidden="true"></span>
-        </span>
-      </label>
-      <p id="status" role="status" aria-live="polite"></p>
-    </main>
-    <script src="popup.js"></script>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat Enhance</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<main>
+  <header><span>Chat Enhance</span><span class="context">当前对话</span></header>
+  <h1>导出为 HTML</h1>
+  <p class="intro">保存网页排版，随时离线阅读。</p>
+
+  <section class="task" aria-live="polite" aria-atomic="true">
+    <div class="task-heading"><span class="indicator" aria-hidden="true"></span><strong id="status">准备导出</strong><span id="elapsed"></span></div>
+    <p id="detail">正在连接对话页面…</p>
+    <progress id="progress" max="1" value="0" aria-label="导出进度" hidden></progress>
+    <div id="counts" hidden></div>
+  </section>
+
+  <div class="actions">
+    <button id="export-html" class="primary" disabled><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5v10m-3.5-3.5 3.5 3.5 3.5-3.5M3.5 13.5v3h13v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="export-label">保存为 HTML</span></button>
+    <button id="cancel-export" class="secondary" hidden>取消</button>
+  </div>
+  <button id="grant-image-access" class="access" hidden></button>
+  <p class="hint">导出时请保留对话页面，关闭此面板可继续导出。</p>
+
+  <details>
+    <summary>复制设置</summary>
+    <label for="compact-math"><span><strong>合并公式内部换行</strong><small>提高 Markdown 编辑器兼容性</small></span><input id="compact-math" type="checkbox" role="switch"></label>
+    <p id="settings-status" role="status"></p>
+  </details>
+</main>
+<script src="popup.js"></script>
+</body>
 </html>

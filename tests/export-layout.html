@@ -1,113 +1,101 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <meta charset="utf-8">
-<title>对话导出测试</title>
+<title>Static HTML: virtual history, resources and scroll viewport</title>
 <style>
-  .thread-scroll-container { height: 180px; overflow-y: auto; }
-  [data-turn-key] { height: 320px; }
-  .code-frame { border: 1px solid #abc; border-radius: 12px; background: #f7f7f8; }
-  .cm-content { white-space: pre; font-family: monospace; }
-  .text-codex-syntax-keyword { color: #a626a4; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  #app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  header { flex: 0 0 40px; }
+  #thread { flex: 1; min-height: 0; overflow-y: auto; }
+  [data-turn-key] { height: 700px; border-bottom: 1px solid #ccc; }
+  /* Parent context and a quoted URL with parentheses broke the old exporter. */
+  .unused-icon { mask-image: url("data:image/svg+xml,%3Csvg%3E(hello)%3C/svg%3E"); }
+  html[data-theme="light"] #app { --fixture-color: rgb(23, 65, 92); font-size: 17px; }
+  #app [data-turn-key] p { color: var(--fixture-color); }
+  #results { position: fixed; top: 0; right: 0; max-width: 50vw; background: white; }
 </style>
-<svg hidden><symbol id="fixture-star"><path d="M0 0L4 4"/></symbol></svg>
-<div class="thread-scroll-container">
-  <div data-turn-key="second"></div>
-  <div data-turn-key="third"></div>
+<div id="app">
+  <header>Fixed application shell</header>
+  <main id="thread" data-app-action-timeline-scroll style="--thread-padding: 16px">
+    <div role="progressbar">Loading older messages</div>
+    <article data-turn-key="second"></article>
+    <article data-turn-key="third"></article>
+  </main>
 </div>
-<button id="download-test" type="button">下载测试 HTML</button>
-<pre id="results">运行中</pre>
+<pre id="results">Running</pre>
 <script>
-  const scroller = document.querySelector(".thread-scroll-container");
-  const blobImage = URL.createObjectURL(new Blob([
-    '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="3" fill="#10a37f"/></svg>'
-  ], { type: "image/svg+xml" }));
-  const loading = document.createElement("div");
-  loading.setAttribute("role", "status");
-  loading.textContent = "Loading older messages…";
-  scroller.prepend(loading);
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = (url, options) => String(url).startsWith("blob:")
-    ? Promise.reject(new TypeError("Failed to fetch"))
-    : originalFetch(url, options);
-  const contents = {
-    first: '<div data-chatgpt-search-unit-key="first:user"><div data-content-search-unit-key="first:user">问题一</div></div>' +
-      '<div data-content-search-unit-key="first:assistant" data-chatgpt-search-unit-key="first:assistant"><p>回答一 <span data-d-component="math"><span class="katex"><math><semantics><msup><mi>x</mi><mn>2</mn></msup><annotation encoding="application/x-tex">x^2</annotation></semantics></math></span></span></p>' +
-      '<img alt="示意图" src="pixel.svg">' +
-      '<img alt="临时图片" src="' + blobImage + '">' +
-      '<script>window.exportUnsafe=true<\/script><button aria-label="复制">复制</button></div>',
-    second: '<div data-chatgpt-search-unit-key="second:user">问题二</div>' +
-      '<div data-content-search-unit-key="second:assistant"><table><tr><th>项目</th><th>值</th></tr><tr><td>A</td><td>2</td></tr></table>' +
-      '<div class="code-frame"><div class="cm-editor"><div class="cm-content" contenteditable="true" style="tab-size: 4;"><div class="cm-line"><span class="text-codex-syntax-keyword">if</span> ready:</div><div class="cm-line">    export()</div><div class="cm-line"><br></div><div class="cm-line">done = True</div></div></div></div>' +
-      '<span data-d-component="math"><span class="katex-display"><span class="katex"><math display="block"><semantics><mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow><annotation encoding="application/x-tex">a+b</annotation></semantics></math></span></span></span><svg><use href="#fixture-star"/></svg></div>',
-    third: '<div data-chatgpt-search-unit-key="third:user">问题三</div>' +
-      '<div data-content-search-unit-key="third:assistant"><p>回答三</p><div class="turn-action-controls"><button>复制回复</button></div></div>'
-  };
-  function renderVisible() {
-    const viewport = scroller.getBoundingClientRect();
-    for (const turn of scroller.querySelectorAll("[data-turn-key]")) {
-      const bounds = turn.getBoundingClientRect();
-      const visible = bounds.bottom > viewport.top - 60 && bounds.top < viewport.bottom + 60;
-      const index = { first: 0, second: 1, third: 2 }[turn.dataset.turnKey];
-      turn.innerHTML = visible
-        ? '<div data-content-search-turn-key="fallback-turn-' + index + '">' + contents[turn.dataset.turnKey] + '</div>'
-        : "";
+  if (new URL(location.href).searchParams.has('long')) {
+    document.querySelector('style').textContent += '[data-turn-key] { height: 210000px; }';
+  }
+  const scroller = document.querySelector('#thread');
+  const originalStyle = scroller.getAttribute('style');
+  function render() {
+    const view = scroller.getBoundingClientRect();
+    for (const turn of scroller.querySelectorAll('[data-turn-key]')) {
+      const box = turn.getBoundingClientRect();
+      turn.innerHTML = box.bottom > view.top && box.top < view.bottom
+        ? `<div data-content-search-unit-key="${turn.dataset.turnKey}:assistant"><p data-d-component="text">Answer ${turn.dataset.turnKey}</p><pre><code>first line\n  indented line</code></pre><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='2' height='2' fill='red'/%3E%3C/svg%3E"><button onclick="alert(1)">Choice</button></div>` : '';
     }
   }
-  scroller.addEventListener("scroll", renderVisible);
-  renderVisible();
-  // Loaded turns initially start at zero even though older messages are pending.
-  for (const [index, marker] of [...scroller.querySelectorAll("[data-content-search-turn-key]")].entries()) marker.dataset.contentSearchTurnKey = `fallback-turn-${index}`;
-  // Older history appears after the exporter has already reached the initial top.
-  window.setTimeout(() => {
-    loading.remove();
-    scroller.insertAdjacentHTML("afterbegin", '<div data-turn-key="first"></div>');
-    renderVisible();
+  scroller.addEventListener('scroll', render);
+  const observer = new ResizeObserver(render);
+  observer.observe(scroller);
+  setTimeout(() => {
+    scroller.querySelector('[role=progressbar]').remove();
+    scroller.insertAdjacentHTML('afterbegin', '<article data-turn-key="first"></article>');
+    render();
   }, 2600);
+  window.chrome = { runtime: {
+    onMessage: { addListener(listener) { window.exportListener = listener; } },
+    async sendMessage() {
+      throw new Error('Image download failed');
+    }
+  }};
 </script>
-<script src="../vendor/katex/katex.min.js"></script>
-<script src="../math.js"></script>
 <script src="../export.js"></script>
 <script>
-  ChatEnhanceExport.collectConversation().then(async (turns) => {
-    const html = ChatEnhanceExport.buildHTML("对话导出测试", "https://chatgpt.com/c/example", turns, await ChatEnhanceExport.captureAppearance());
-    document.querySelector("#download-test").addEventListener("click", () =>
-      ChatEnhanceExport.downloadHTML({ html, filename: "对话导出测试.html", turns: turns.length })
-    );
-    const offline = new DOMParser().parseFromString(html, "text/html");
-    const python = document.createElement("div");
-    python.innerHTML = '<div data-markdown-copy="code-block"><div data-markdown-copy="exclude">Python</div><code></code></div>';
-    const pythonText = '# comment\nx0 = torch.randn_like(image)\ns = "# still a string"\nflag = True\n';
-    python.querySelector("code").textContent = pythonText;
-    ChatEnhanceExport.highlightStaticPython(python);
-    const breaks = python.cloneNode(true);
-    breaks.querySelector("code").innerHTML = 'x = 1<br><br># comment';
-    ChatEnhanceExport.highlightStaticPython(breaks);
-    const assertions = {
-      turns: turns.length,
-      userAndAssistant: offline.querySelectorAll(".message--user").length === 3 &&
-        offline.querySelectorAll(".message--assistant").length === 3 &&
-        offline.body.textContent.includes("问题一") && offline.body.textContent.includes("回答三"),
-      formula: offline.querySelectorAll("math").length === 2,
-      codeLines: offline.querySelectorAll(".cm-line").length === 4 &&
-        offline.querySelector(".cm-content").style.tabSize === "4" &&
-        !offline.querySelector("[contenteditable]"),
-      liveStyles: html.includes("#a626a4") || html.includes("rgb(166, 38, 164)"),
-      staticBreaks: breaks.querySelector("code").textContent === 'x = 1\n\n# comment',
-      staticPython: python.querySelector("code").textContent === pythonText &&
-        python.querySelectorAll(".export-code-comment").length === 1 &&
-        python.querySelector(".text-codex-syntax-string").textContent === '"# still a string"' &&
-        python.querySelector(".text-codex-syntax-variable").textContent === "x0",
-      table: offline.querySelectorAll("table").length === 1,
-      imageEmbedded: offline.querySelectorAll("img").length === 2 &&
-        offline.querySelectorAll("img")[0].src.startsWith("data:image/svg+xml;base64,") &&
-        offline.querySelectorAll("img")[1].src.startsWith("data:image/png;base64,"),
-      unsafeRemoved: !html.includes("window.exportUnsafe") && !html.includes("turn-action-controls"),
-      symbolResolved: offline.querySelectorAll("svg g path").length === 1 && !offline.querySelector("svg use"),
-      filename: ChatEnhanceExport.filenameForTitle("测试/对话") === "测试 对话.html"
-    };
-    document.querySelector("#results").textContent = JSON.stringify(assertions);
-  }).catch((error) => {
-    document.querySelector("#results").textContent = `ERROR: ${error.message}`;
-  });
+(async () => {
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  scroller.scrollTop = 200;
+  const originalTop = scroller.scrollTop;
+  const result = await ChatEnhanceExport.createConversationHTML();
+  const saved = new DOMParser().parseFromString(result.html, 'text/html');
+  const savedScroller = saved.querySelector('#thread');
+  const getState = () => new Promise(resolve => exportListener({type:"chat-enhance-export-status"}, {}, resolve));
+  const assertions = {
+    statusSurvivesPopup: (await getState()).status === "done",
+    entireHistory: result.turns === 3 && savedScroller.textContent.includes('Answer first') && savedScroller.textContent.includes('Answer third'),
+    staticOnly: !saved.querySelector('script, [onclick]') && [...saved.querySelectorAll('button')].every(b => b.hasAttribute("inert")),
+    codeLines: saved.querySelector('code').textContent === 'first line\n  indented line',
+    imagesEmbedded: [...saved.images].every(img => img.src.startsWith('data:')),
+    nativeContext: !!saved.querySelector('#app #thread') && saved.documentElement.dataset.theme === 'light' && !saved.querySelector('header, #results'),
+    sourceRestored: scroller.getAttribute('style') === originalStyle && scroller.scrollTop === originalTop,
+  };
+  const preview = document.createElement('iframe');
+  const loaded = new Promise(resolve => preview.onload = resolve);
+  preview.srcdoc = result.html;
+  document.body.append(preview);
+  await loaded;
+  const style = preview.contentWindow.getComputedStyle(preview.contentDocument.querySelector('[data-turn-key] p'));
+  assertions.stylesParsed = style.color === 'rgb(23, 65, 92)' && style.fontSize === '17px';
+  preview.remove();
+  // An unreadable cross-origin image must fail explicitly and still restore the page.
+  scroller.removeEventListener('scroll', render);
+  for (const turn of scroller.querySelectorAll('[data-turn-key]')) {
+    turn.innerHTML = '<p data-content-search-unit-key="test:assistant"><span data-d-component="text">Failure case</span><img src="https://images.example.com/missing.png"></p>';
+  }
+  observer.disconnect();
+  try { await ChatEnhanceExport.createConversationHTML(); }
+  catch (error) { assertions.captureFailure = error.message.includes('Image download failed'); }
+  assertions.failureRestoresSource = scroller.getAttribute('style') === originalStyle && scroller.scrollTop === originalTop;
+  const cancelJob = ChatEnhanceExport.createConversationHTML().then(() => false, error => error.message === '已取消导出');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  exportListener({type:'chat-enhance-cancel-export'}, {}, () => {});
+  assertions.cancelled = await cancelJob && (await getState()).status === 'cancelled';
+  assertions.cancelRestoresSource = scroller.getAttribute('style') === originalStyle && scroller.scrollTop === originalTop;
+  window.exportFixture = {result, assertions};
+  document.querySelector('#results').textContent = JSON.stringify(assertions);
+  if (Object.values(assertions).some(value => !value)) throw Error('Export regression failed');
+})().catch(error => { document.querySelector('#results').textContent = 'ERROR: ' + error.message; });
 </script>
 </html>

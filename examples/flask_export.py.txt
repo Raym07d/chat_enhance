@@ -1,0 +1,45 @@
+"""Copy beside chat_enhance.py in your Flask project; register chat_exports."""
+from io import BytesIO
+from threading import Lock
+from urllib.error import URLError
+
+from flask import Blueprint, current_app, jsonify, request, send_file
+from websockets.exceptions import WebSocketException
+from chat_enhance import export_chatgpt
+
+chat_exports = Blueprint("chat_exports", __name__)
+export_lock = Lock()
+
+
+@chat_exports.post("/api/chatgpt/export")
+def export_html():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get("url"), str):
+        return jsonify(error="请提供 JSON：{url: 对话链接}"), 400
+    if not current_app.config.get("CHAT_ENHANCE_EXTENSION_ID"):
+        return jsonify(error="未配置 CHAT_ENHANCE_EXTENSION_ID"), 500
+    if not export_lock.acquire(blocking=False):
+        return jsonify(error="正在导出，请等待当前任务结束"), 409
+    try:
+        result = export_chatgpt(
+            data["url"],
+            extension_id=current_app.config["CHAT_ENHANCE_EXTENSION_ID"],
+            port=current_app.config.get("CHAT_ENHANCE_PORT", 9222),
+            timeout=current_app.config.get("CHAT_ENHANCE_TIMEOUT", 300),
+        )
+        response = send_file(BytesIO(result["html"].encode("utf-8")),
+                             mimetype="text/html", as_attachment=True,
+                             download_name=result["filename"])
+        response.headers["X-Chat-Enhance-Turns"] = str(result["turns"])
+        response.headers["X-Chat-Enhance-Warnings"] = str(len(result["warnings"]))
+        return response
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    except TimeoutError:
+        return jsonify(error="导出等待超时，浏览器任务可能仍在运行，请查看扩展面板，勿立即重试"), 504
+    except (URLError, OSError):
+        return jsonify(error="无法连接本机 Chrome 调试端口"), 503
+    except (RuntimeError, WebSocketException) as error:
+        return jsonify(error=str(error)), 502
+    finally:
+        export_lock.release()

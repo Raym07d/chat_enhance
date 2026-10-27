@@ -1,117 +1,141 @@
 (function () {
   "use strict";
+  const TURN = "[data-turn-key]";
+  const REMOVE_SELECTOR = 'script, style, link, meta, base, template, object, embed, noscript, .turn-action-controls, [data-testid="conversation-turn-actions"], [data-selected-text-overlay], [data-chat-enhance-copy-markdown], [data-chat-enhance-copy-word]';
+  const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  let exporting = false;
+  let cancelled = false, sourceURL = "", notice;
+  let state = { status: "idle", stage: "准备导出", turns: 0, completed: 0, total: 0 };
 
-  const UNIT_SELECTOR = [
-    '[data-content-search-unit-key$=":user"]',
-    '[data-content-search-unit-key$=":assistant"]',
-    '[data-chatgpt-search-unit-key$=":user"]',
-    '[data-chatgpt-search-unit-key$=":assistant"]'
-  ].join(",");
-  const REMOVE_SELECTOR = [
-    "script", "style", "link", "meta", "base", "template", "iframe", "frame", "frameset", "object", "embed", "form",
-    "input", "textarea", "select", "noscript", "video", "audio",
-    ".turn-action-controls", '[data-testid="conversation-turn-actions"]',
-    "[data-selected-text-overlay]", "[data-chat-enhance-copy-markdown]",
-    "[data-chat-enhance-copy-word]", "svg script", "svg foreignObject"
-  ].join(",");
+  function updateState(patch) {
+    state = { ...state, ...patch };
+    if (!notice?.isConnected) {
+      notice = document.createElement("aside");
+      const shadow = notice.attachShadow({ mode: "open" });
+      shadow.innerHTML = `<style>:host{position:fixed;right:20px;bottom:24px;z-index:2147483647;font:13px/1.6 system-ui;color:#182b26}section{background:#fff;border:1px solid #d9e4df;border-radius:14px;padding:14px 18px;box-shadow:0 8px 30px #0002;max-width:340px}strong{display:block}p{margin:4px 0 8px;color:#52645d}button{border:1px solid #ccd9d2;background:#fff;border-radius:6px;padding:3px 10px;color:inherit;cursor:pointer}</style><section role="status" aria-live="polite"><strong></strong><p></p><button></button></section>`;
+      shadow.querySelector("button").onclick = () => exporting ? cancelExport() : notice.remove();
+      document.body.append(notice);
+    }
+    notice.shadowRoot.querySelector("strong").textContent = state.stage;
+    notice.shadowRoot.querySelector("p").textContent = state.detail || `已加载 ${state.turns} 轮 · 资源 ${state.completed}/${state.total}`;
+    notice.shadowRoot.querySelector("button").textContent = ["running", "cancelling"].includes(state.status) ? "取消导出" : "关闭";
+  }
 
-  // The live stylesheet supplies typography, code panes, tables and theme colors.
-  // These overrides only remove app/virtualizer constraints from the saved document.
-  const EXPORT_CSS = `
-    html, body { height: auto !important; min-height: 100%; overflow: visible !important; }
-    body { margin: 0; }
-    .export-header { max-width: var(--export-width); margin: 0 auto; padding: 24px 20px; }
-    .export-header h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
-    .export-header a { font-size: 13px; text-decoration: underline; }
-    .export-container { container-type: inline-size; container-name: thread-content; }
-    .export-transcript { width: 100%; max-width: var(--export-width); margin: 0 auto; padding: 0 20px 64px; }
-    .export-transcript > .turn { margin-bottom: 12px; }
-    .export-transcript [data-virtualized-turn-content] { content-visibility: visible !important; contain: none !important; }
-    .export-transcript img { max-width: 100%; }
-    .export-transcript .cm-content { white-space: pre !important; }
-    .export-transcript .cm-line { display: block; }
-    .export-transcript .cm-gap, .export-transcript .cm-announced, .export-transcript .cm-cursorLayer,
-    .export-transcript .cm-selectionLayer, .export-transcript .sr-only, .export-transcript [hidden] { display: none !important; }
-    .export-transcript .cm-scroller { overflow: auto; }
-    .export-transcript .export-static-code { padding-top: 12px; }
-    .export-code-comment { color: var(--color-codex-syntax-comment); font-style: normal; }
-    @container style(--theme-variant: light) { .export-code-comment { font-style: italic; } }
-    .export-transcript [data-markdown-text-style] { overflow-wrap: anywhere; }
-    @media print { .export-header a { display: none; } }
-  `;
+  function cancelExport() {
+    if (!exporting) return;
+    cancelled = true;
+    updateState({ status: "cancelling", stage: "正在取消", detail: "等待正在读取的资源结束，然后恢复页面…" });
+  }
 
-  const usedFonts = new Set();
-  function rememberFonts(root) {
-    for (const element of [root, ...root.querySelectorAll(".cm-content, .katex, .katex *")]) {
-      for (const family of getComputedStyle(element).fontFamily.split(",")) {
-        usedFonts.add(family.trim().replace(/^['"]|['"]$/g, "").toLowerCase());
-      }
+  function checkExport() {
+    if (cancelled) throw new Error("已取消导出");
+    if (location.href !== sourceURL) throw new Error("页面已切换到其他对话，请重试");
+  }
+
+  let resourceSlots = 0;
+  const resourceQueue = [];
+  async function resource(read) {
+    checkExport();
+    updateState({ total: state.total + 1 });
+    if (resourceSlots < 6) resourceSlots++;
+    else await new Promise(resolve => resourceQueue.push(resolve));
+    try { checkExport(); return await read(); }
+    finally {
+      const next = resourceQueue.shift();
+      if (next) next(); else resourceSlots--;
+      updateState({ completed: state.completed + 1 });
     }
   }
 
-  async function captureAppearance() {
-    const container = document.querySelector("[data-thread-user-message-navigation-content]") || document.body;
-    const computed = getComputedStyle(container);
-    const body = getComputedStyle(document.body);
-    const variables = Array.from(computed).filter((name) => name.startsWith("--"))
-      .map((name) => `${name}:${computed.getPropertyValue(name)};`).join("");
-    const fontCache = new Map();
-    const sheets = [];
-    for (const sheet of [...document.styleSheets, ...document.adoptedStyleSheets]) {
-      try { sheets.push({ css: Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n"), base: sheet.href || location.href }); }
+  async function settleAll(tasks) {
+    const results = await Promise.allSettled(tasks);
+    const failure = results.find(result => result.status === "rejected");
+    if (failure) throw failure.reason;
+    return results.map(result => result.value);
+  }
+
+  async function captureStyles() {
+    // Let the browser parse CSS. Editing an entire stylesheet with regex corrupts
+    // nested rules and quoted strings in the current ChatGPT stylesheets.
+    const loadedFonts = new Set([...document.fonts].filter(face => face.status === "loaded")
+      .map(face => face.family.replace(/['"]/g, "").toLowerCase()));
+    const cache = new Map();
+    async function sheetText(sheet) {
+      let rules;
+      try { rules = [...sheet.cssRules]; }
       catch { throw new Error("无法读取网页样式，请刷新页面后重试"); }
+      return (await settleAll(rules.map(async rule => {
+        if (rule.type !== CSSRule.IMPORT_RULE) return rule.cssText;
+        let css = await sheetText(rule.styleSheet);
+        if (rule.media.mediaText) css = `@media ${rule.media.mediaText}{${css}}`;
+        if (rule.layerName !== null && rule.layerName !== undefined) css = `@layer ${rule.layerName}{${css}}`;
+        return css;
+      }))).join("\n");
     }
-    const styles = await Promise.all(sheets.map(async ({ css, base }) => {
-      const faces = Array.from(css.matchAll(/@font-face\s*\{[^}]*\}/gi));
-      for (const [face] of faces) {
-        const family = /font-family:\s*([^;]+)/i.exec(face)?.[1].trim().replace(/^['"]|['"]$/g, "").toLowerCase();
-        let replacement = "";
-        if (usedFonts.has(family)) {
-          const sources = Array.from(face.matchAll(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/gi));
-          const source = sources.find((match) => /woff2(?:[?#]|$)/i.test(match[1])) || sources[0];
-          if (source) {
-            const url = new URL(source[1], base).href;
-            if (!fontCache.has(url)) fontCache.set(url, (async () => {
-              const response = await fetch(url);
-              if (!response.ok) throw new Error(`字体读取失败：HTTP ${response.status}`);
-              return blobDataURL(await response.blob());
-            })());
-            const data = await fontCache.get(url);
-            replacement = face.replace(/src:[^;]+;/i, `src:url("${data}");`);
-          }
-        }
-        css = css.replace(face, replacement);
-      }
-      // Saved files must not make hidden network requests for unrelated app assets.
-      return css.replace(/@import\s+[^;]+;/gi, "")
-        .replace(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/gi, (match, url) => url.startsWith("data:") ? match : 'url("")');
+    async function rewrite(rules, base) {
+      await settleAll([...rules].map(async rule => {
+        if (rule.type === CSSRule.FONT_FACE_RULE) {
+          const family = rule.style.getPropertyValue("font-family").replace(/['"]/g, "").toLowerCase();
+          if (!loadedFonts.has(family)) { rule.style.removeProperty("src"); return; }
+          const src = rule.style.getPropertyValue("src");
+          const match = /url\(\s*["']?([^"')]+)["']?\s*\)/i.exec(src);
+          if (!match) return;
+          const url = new URL(match[1], base).href;
+          if (!cache.has(url)) cache.set(url, resource(async () => {
+            const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+            if (!response.ok) throw new Error(`字体读取失败：HTTP ${response.status}`);
+            return blobDataURL(await response.blob());
+          }));
+          rule.style.setProperty("src", `url("${await cache.get(url)}")`);
+        } else if (rule.cssRules) await rewrite(rule.cssRules, base);
+      }));
+    }
+    return settleAll([...document.styleSheets, ...document.adoptedStyleSheets].map(async sheet => {
+      const copy = new CSSStyleSheet();
+      copy.replaceSync(await sheetText(sheet));
+      await rewrite(copy.cssRules, sheet.href || location.href);
+      return [...copy.cssRules].map(rule => rule.cssText).join("\n");
     }));
-    return {
-      css: styles.join("\n") + `\n:root{${variables}} body{background:${body.backgroundColor};color:${body.color};font:${body.font};}`,
-      htmlClass: document.documentElement.className,
-      bodyClass: document.body.className,
-      width: container === document.body ? "808px" : computed.width,
-      containerClass: container.className
-    };
   }
 
-  function delay(ms) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  function snapshotLayout(scroller, roots) {
+    const html = document.documentElement.cloneNode(false);
+    const body = document.body.cloneNode(false);
+    html.append(document.createElement("head"), body);
+    // Keep theme attributes, inherited variables and named container contexts.
+    // Prune app chrome instead of inventing a new transcript layout.
+    const ancestors = [];
+    for (let element = scroller.parentElement; element !== document.body; element = element.parentElement) ancestors.unshift(element);
+    let parent = body;
+    for (const original of ancestors) {
+      const clone = original.cloneNode(false);
+      parent.append(clone);
+      parent = clone;
+      for (const [name, value] of Object.entries({ height:"auto", "min-height":"0", "max-height":"none", overflow:"visible", width:"100%", "max-width":"none", position:"relative" })) clone.style.setProperty(name, value, "important");
+    }
+    const paths = new Set([scroller]);
+    for (const root of roots) for (let node = root; node !== scroller; node = node.parentElement) paths.add(node);
+    const copies = [];
+    function copyPath(original) {
+      const clone = original.cloneNode(roots.includes(original));
+      if (roots.includes(original)) { copies.push({ root:original, clone }); return clone; }
+      for (const child of original.children) if (paths.has(child)) clone.append(copyPath(child));
+      for (const [name, value] of Object.entries({ height:"auto", "min-height":"0", "max-height":"none", overflow:"visible", transform:"none", "margin-top":"0", "content-visibility":"visible", contain:"none" })) clone.style.setProperty(name, value, "important");
+      return clone;
+    }
+    parent.append(copyPath(scroller));
+    for (const node of [html, body]) {
+      for (const [name, value] of Object.entries({ height:"auto", "min-height":"100%", overflow:"visible" })) node.style.setProperty(name, value, "important");
+    }
+    body.style.setProperty("max-width", `${scroller.getBoundingClientRect().width}px`);
+    body.style.setProperty("margin", "0 auto");
+    return { html, copies };
   }
 
   function escapeHTML(value) {
     return String(value).replace(/[&<>"']/g, (char) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
     })[char]);
-  }
-
-  function currentConversationURL() {
-    const url = new URL(location.href);
-    if (!(url.hostname === "chatgpt.com" &&
-          /^\/(?:g\/[^/]+\/)?c\/[^/]+\/?$/.test(url.pathname))) {
-      throw new Error("请先打开一条 ChatGPT 对话");
-    }
-    return `${url.origin}${url.pathname}`;
   }
 
   function filenameForTitle(title) {
@@ -124,36 +148,6 @@
     return `${safe}.html`;
   }
 
-  function turnRoots() {
-    const units = Array.from(document.querySelectorAll(UNIT_SELECTOR));
-    return Array.from(new Set(units.map((unit) =>
-      unit.closest("[data-turn-key], article") || unit
-    )));
-  }
-
-  function roleForUnit(unit) {
-    const key = unit.getAttribute("data-content-search-unit-key") ||
-      unit.getAttribute("data-chatgpt-search-unit-key") || "";
-    return key.endsWith(":user") ? "user" : "assistant";
-  }
-
-  function replaceMath(clone) {
-    const wrappers = globalThis.ChatEnhanceMath.roots(clone);
-    for (const wrapper of wrappers) {
-      if (!wrapper.isConnected && !clone.contains(wrapper)) continue;
-      if (wrapper.closest("pre, code")) continue;
-      const { display, math } = globalThis.ChatEnhanceMath.read(wrapper);
-      if (!math) {
-        throw new Error("有公式无法离线保存，请刷新页面后重试");
-      }
-      // Keep KaTeX's visual tree when available; MathML remains for accessibility.
-      if (wrapper.querySelector(".katex-html")) continue;
-      const replacement = math.cloneNode(true);
-      replacement.setAttribute("display", display ? "block" : "inline");
-      wrapper.replaceWith(replacement);
-    }
-  }
-
   function blobDataURL(blob) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -164,7 +158,7 @@
   }
 
   async function renderedImageDataURL(image) {
-    if (!image.complete || !image.naturalWidth) await image.decode();
+    if (!image.complete || !image.naturalWidth) throw new Error("图片尚未加载完成");
     if (!image.naturalWidth || !image.naturalHeight) throw new Error("图片尚未加载完成");
     const canvas = document.createElement("canvas");
     canvas.width = image.naturalWidth;
@@ -182,57 +176,32 @@
 
   async function imageDataURL(source, image, cache) {
     if (source.startsWith("data:image/")) return source;
-    if (!/^(https?:|blob:)/i.test(source)) throw new Error("对话图片地址无效，无法离线保存");
-    if (cache.has(source)) return cache.get(source);
-    const promise = (async () => {
-      // Extension background fetches bypass image CORS; avoid two doomed attempts first.
-      if (source.startsWith("https:") && new URL(source).origin !== location.origin && globalThis.chrome?.runtime?.sendMessage) {
+    if (!cache.has(source)) cache.set(source, resource(async () => {
+      if (source.startsWith("https:") && new URL(source).origin !== location.origin) {
         const result = await chrome.runtime.sendMessage({ type: "chat-enhance-read-image", url: source });
-        if (result?.ok && result.data?.startsWith("data:image/")) return result.data;
-        if (result?.permissionOrigin) {
-          const error = new Error(`需要允许读取 ${new URL(source).hostname} 的图片`);
-          error.permissionOrigin = result.permissionOrigin;
-          throw error;
-        }
-        if (result?.error) throw new Error(`无法读取 ${new URL(source).hostname} 的图片（${result.error}）`);
+        if (result?.ok) return result.data;
+        const error = new Error(result?.permissionOrigin ? `需要允许读取 ${new URL(source).hostname} 的图片` : result?.error || "图片读取失败");
+        error.permissionOrigin = result?.permissionOrigin;
+        throw error;
       }
       try {
-        const response = await fetch(source);
+        const response = await fetch(source, { signal: AbortSignal.timeout(15000) });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const blob = await response.blob();
         if (!blob.type.startsWith("image/")) throw new Error("返回内容不是图片");
         return await blobDataURL(blob);
-      } catch (fetchError) {
-        // A visible blob image may still be readable from the rendered pixels.
-        try {
-          return await renderedImageDataURL(image);
-        } catch {
-          if (source.startsWith("https:") && globalThis.chrome?.runtime?.sendMessage) {
-            const result = await chrome.runtime.sendMessage({
-              type: "chat-enhance-read-image", url: source
-            });
-            if (result?.ok && result.data?.startsWith("data:image/")) return result.data;
-            if (result?.permissionOrigin) {
-              const error = new Error(`需要允许读取 ${new URL(source).hostname} 的图片`);
-              error.permissionOrigin = result.permissionOrigin;
-              throw error;
-            }
-            if (result?.error) throw new Error(`无法读取 ${new URL(source).hostname} 的图片（${result.error}）`);
-          }
-          const host = source.startsWith("blob:") ? "页面临时图片" : new URL(source).hostname;
-          throw new Error(`无法读取 ${host} 的图片（${fetchError.message}），请确认图片已加载后重试`);
-        }
+      } catch (error) {
+        try { return await renderedImageDataURL(image); }
+        catch { throw error; }
       }
-    })();
-    cache.set(source, promise);
-    promise.catch(() => cache.delete(source));
-    return promise;
+    }));
+    return cache.get(source);
   }
 
   async function inlineMedia(original, clone, cache) {
     const sourceImages = Array.from(original.querySelectorAll("img"));
     const clonedImages = Array.from(clone.querySelectorAll("img"));
-    await Promise.all(clonedImages.map(async (image, index) => {
+    await settleAll(clonedImages.map(async (image, index) => {
       const source = sourceImages[index]?.currentSrc || sourceImages[index]?.src || "";
       if (!source) {
         clonedImages[index].replaceWith(document.createTextNode(clonedImages[index].alt || "[图片]"));
@@ -259,6 +228,7 @@
         throw new Error("对话图表无法离线保存");
       }
       const image = document.createElement("img");
+      for (const attr of sourceCanvases[index].attributes) image.setAttribute(attr.name, attr.value);
       image.src = source;
       image.alt = sourceCanvases[index].getAttribute("aria-label") || "图表";
       clonedCanvases[index].replaceWith(image);
@@ -282,11 +252,6 @@
           "contenteditable", "autofocus", "srcdoc", "nonce", "integrity",
           "formaction", "action", "ping", "poster", "srcset"
         ].includes(attribute.name)) element.removeAttribute(attribute.name);
-      }
-      if (element.hasAttribute("style")) {
-        for (const property of Array.from(element.style)) {
-          if (/url\(|expression\(|@import/i.test(element.style.getPropertyValue(property))) element.style.removeProperty(property);
-        }
       }
       if (element.tagName === "A") {
         const href = element.getAttribute("href") || "";
@@ -312,190 +277,120 @@
         }
       }
     }
-    for (const button of Array.from(clone.querySelectorAll("button, [role='button']"))) {
-      if (button.matches("[data-chat-enhance-copy-markdown], [data-chat-enhance-copy-word]")) {
-        button.remove();
-      } else {
-        const text = button.textContent.trim();
-        if (text) {
-          const span = document.createElement("span");
-          span.textContent = text;
-          button.replaceWith(span);
-        } else button.remove();
-      }
+    for (const control of clone.querySelectorAll("button, input, textarea, select")) {
+      control.setAttribute("inert", "");
     }
   }
 
-  // Offscreen Python panes are plain-text placeholders in ChatGPT's virtualizer.
-  // Tokenize that text without changing it, using the same syntax colors as the editor.
-  function highlightStaticPython(clone) {
-    const keywords = new Set("and as assert async await break case class continue def del elif else except finally for from global if import in is lambda match nonlocal not or pass raise return try while with yield".split(" "));
-    const tokens = /(?<string>(?:[rbuf]{1,2})?(?:"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))|(?<comment>#[^\n]*)|(?<number>\b(?:0[xob][\da-f_]+|\d[\d_]*(?:\.[\d_]*)?(?:e[+-]?[\d_]+)?j?)\b)|(?<identifier>[_\p{ID_Start}][_\p{ID_Continue}]*)|(?<operator>[+*/%=<>!&|^~.:-])/giu;
-    for (const frame of clone.querySelectorAll('[data-markdown-copy="code-block"]')) {
-      const code = frame.querySelector("code");
-      if (code && Array.from(code.classList).some((name) => name.startsWith("CodeContent-"))) code.classList.add("export-static-code");
-      const label = frame.querySelector('[data-markdown-copy="exclude"]')?.textContent.trim() || "";
-      if (!code || !/^python\b/i.test(label)) continue;
-      // Some placeholder variants use <br> for empty lines instead of text nodes.
-      for (const lineBreak of code.querySelectorAll("br")) lineBreak.replaceWith(document.createTextNode("\n"));
-      const text = code.textContent;
-      const fragment = document.createDocumentFragment();
-      let offset = 0;
-      for (const token of text.matchAll(tokens)) {
-        fragment.append(document.createTextNode(text.slice(offset, token.index)));
-        const value = token[0];
-        let type = token.groups.string ? "string" : token.groups.number ? "literal" : token.groups.operator ? "keyword" : "variable";
-        if (keywords.has(value)) type = "keyword";
-        if (["True", "False", "None"].includes(value)) type = "literal";
-        if (token.groups.identifier && text[token.index - 1] === ".") type = "";
-        const span = document.createElement("span");
-        span.className = token.groups.comment ? "export-code-comment" : type ? `text-codex-syntax-${type}` : "";
-        span.textContent = value;
-        fragment.append(span);
-        offset = token.index + value.length;
-      }
-      fragment.append(document.createTextNode(text.slice(offset)));
-      code.replaceChildren(fragment);
-    }
+  function restoreStyle(element, style) {
+    if (style === null) element.removeAttribute("style");
+    else element.setAttribute("style", style);
   }
 
-  async function captureTurn(root, cache) {
-    rememberFonts(root);
-    const clone = root.cloneNode(true);
-    await inlineMedia(root, clone, cache);
-    replaceMath(clone);
-    highlightStaticPython(clone);
-    sanitize(clone);
-    clone.classList.add("turn");
-    const candidates = [clone, ...clone.querySelectorAll(UNIT_SELECTOR)]
-      .filter((unit) => unit.matches(UNIT_SELECTOR));
-    for (const unit of candidates.filter((unit) => !candidates.some((parent) => parent !== unit && parent.contains(unit)))) {
-      unit.classList.add("message", `message--${roleForUnit(unit)}`);
+  function conversationScroller() {
+    for (let element = document.querySelector(TURN)?.parentElement; element; element = element.parentElement) {
+      if (["auto", "scroll"].includes(getComputedStyle(element).overflowY)) return element;
     }
-    return clone.outerHTML;
+    return null;
   }
 
-  async function collectConversation() {
-    usedFonts.clear();
-    const cache = new Map();
-    const collected = new Map();
-    const capturedIndices = new Set();
-    const scroller = document.querySelector(".thread-scroll-container");
-    const originalTop = scroller?.scrollTop;
-    const reverse = scroller && getComputedStyle(scroller).flexDirection === "column-reverse";
+  async function expandConversation(scroller) {
     const deadline = Date.now() + 300000;
-
-    function historyLoading() {
-      // During pagination, fallback-turn-0 refers to the oldest *loaded* turn.
-      // It cannot prove that the actual beginning of the conversation is loaded.
-      const walker = document.createTreeWalker(scroller, NodeFilter.SHOW_TEXT);
-      let node;
-      while ((node = walker.nextNode())) {
-        if (/^(?:Loading older messages|正在加载(?:较早|更早|历史|以前|旧).*消息|加载(?:较早|更早|历史|以前|旧).*消息)/i.test(node.textContent.trim()) &&
-            !node.parentElement.closest("[data-turn-key], article")) return true;
-      }
-      return Boolean(scroller.querySelector('[aria-busy="true"]'));
-    }
-
-    async function captureRendered() {
-      const roots = turnRoots();
-      const pending = [];
-      for (const root of roots) {
-        const key = root.getAttribute("data-turn-key") ||
-          root.getAttribute("data-content-search-unit-key") ||
-          root.getAttribute("data-chatgpt-search-unit-key");
-        if (!key) continue;
-        if (collected.has(key)) continue;
-        const capture = captureTurn(root, cache);
-        collected.set(key, capture);
-        pending.push(capture);
-        const marker = root.querySelector("[data-content-search-turn-key]")?.getAttribute("data-content-search-turn-key") || "";
-        const index = /^fallback-turn-(\d+)$/.exec(marker);
-        if (index) capturedIndices.add(Number(index[1]));
-      }
-      await Promise.all(pending);
-    }
-
-    try {
-      if (!scroller) {
-        await captureRendered();
-      } else {
-        const historyDeadline = Date.now() + 90000;
-        let stableAtTop = 0;
-        let lastHeight = -1;
-        while (Date.now() < historyDeadline) {
-          scroller.scrollTop = reverse ? -scroller.scrollHeight : 0;
-          await delay(500);
-          const start = reverse ? -Math.max(0, scroller.scrollHeight - scroller.clientHeight) : 0;
-          const atTop = Math.abs(scroller.scrollTop - start) < 3;
-          const firstMarker = scroller.querySelector("[data-content-search-turn-key]")
-            ?.getAttribute("data-content-search-turn-key") || "";
-          const firstIndex = /^fallback-turn-(\d+)$/.exec(firstMarker);
-          const hasOldestTurn = !firstIndex || Number(firstIndex[1]) === 0;
-          stableAtTop = atTop && hasOldestTurn && !historyLoading() && scroller.scrollHeight === lastHeight
-            ? stableAtTop + 1 : 0;
-          lastHeight = scroller.scrollHeight;
-          if (stableAtTop >= (firstIndex ? 2 : 12)) break;
-        }
-        if (Date.now() >= historyDeadline) throw new Error("对话历史未能加载到第一条消息，请稍后重试");
-
-        while (Date.now() < deadline) {
-          await delay(100);
-          await captureRendered();
-          const end = reverse ? 0 : Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-          if (scroller.scrollTop >= end - 2) {
-            await delay(300);
-            await captureRendered();
-            break;
-          }
-          // Every mounted turn is captured in full, including the virtualizer's overscan.
-          // Jump to its last boundary instead of walking hundreds of empty viewports.
-          const roots = turnRoots();
-          const viewport = scroller.getBoundingClientRect();
-          const lastBottom = Math.max(...roots.map((root) => root.getBoundingClientRect().bottom));
-          const step = Math.max(scroller.clientHeight * 0.75, lastBottom - viewport.top - 100);
-          scroller.scrollTop = Math.min(end, scroller.scrollTop + step);
-        }
-        if (Date.now() >= deadline) throw new Error("对话过长，尚未完整读取，请重试");
-      }
-    } finally {
-      if (scroller) scroller.scrollTop = originalTop;
-    }
-    if (!collected.size) throw new Error("没有找到可导出的对话内容");
-    if (capturedIndices.size) {
-      const last = Math.max(...capturedIndices);
-      for (let index = 0; index <= last; index += 1) {
-        if (!capturedIndices.has(index)) throw new Error(`第 ${index + 1} 轮对话未能读取，请重试`);
+    let height = 40000, previous = "", stable = 0, changedAt = Date.now();
+    while (Date.now() < deadline) {
+      checkExport();
+      for (const name of ["height", "min-height"]) scroller.style.setProperty(name, `${height}px`, "important");
+      scroller.style.setProperty("max-height", "none", "important");
+      scroller.scrollTop = 0;
+      await delay(600);
+      checkExport();
+      const turns = [...scroller.querySelectorAll(TURN)];
+      const signature = turns.map(turn => `${turn.dataset.turnKey}:${turn.textContent.length}`).join("|");
+      const replies = [...scroller.querySelectorAll('[data-content-search-unit-key$=":assistant"]')];
+      const loading = scroller.querySelector('[aria-busy="true"], [role="progressbar"]') ||
+        replies.some(reply => !reply.querySelector("[data-d-component], [data-markdown-text-style], .markdown, img, canvas"));
+      const fits = scroller.scrollHeight <= scroller.clientHeight + 2;
+      if (signature !== previous) changedAt = Date.now();
+      updateState({ turns: turns.length, detail: `已加载 ${turns.length} 轮，正在确认历史消息完整…` });
+      stable = turns.length && !loading && fits && signature === previous ? stable + 1 : 0;
+      if (stable >= 5) return turns.map(turn => turn.dataset.turnKey);
+      if (Date.now() - changedAt > 45000) throw new Error("历史加载超过 45 秒没有进展，请检查网络后重试");
+      previous = signature;
+      if (!fits) {
+        const next = Math.max(height * 2, scroller.scrollHeight + 40000);
+        if (next > 16000000) throw new Error("对话超过浏览器可展开的高度，无法保证完整导出");
+        height = next;
       }
     }
-    return Promise.all(collected.values());
+    throw new Error("历史加载超过 5 分钟，请重试");
   }
 
-  function buildHTML(title, sourceURL, turns, appearance = {}) {
-    const safeTitle = escapeHTML(title);
-    const safeURL = escapeHTML(sourceURL);
-    return `<!doctype html>
-<html lang="zh-CN" class="${escapeHTML(appearance.htmlClass || "")}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-<title>${safeTitle}</title><style>${(appearance.css || "").replace(/<\/style/gi, "<\\/style")}
-${EXPORT_CSS}
-:root { --export-width: ${appearance.width || "808px"}; }
-</style></head><body class="${escapeHTML(appearance.bodyClass || "")}">
-<header class="export-header"><h1>${safeTitle}</h1><a href="${safeURL}" target="_blank" rel="noreferrer noopener">打开原对话</a></header>
-<div class="export-container"><main class="export-transcript ${escapeHTML(appearance.containerClass || "")}">${turns.join("\n")}</main></div></body></html>`;
+  function buildHTML(layout, styles, title) {
+    const head = layout.html.querySelector("head");
+    head.innerHTML = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${escapeHTML(title)}</title>`;
+    for (const css of styles) {
+      const style = document.createElement("style");
+      style.textContent = css.replace(/<\/style/gi, "<\\/style");
+      head.append(style);
+    }
+    return `<!doctype html>\n${layout.html.outerHTML}`;
   }
 
   async function createConversationHTML() {
-    const sourceURL = currentConversationURL();
-    const title = document.title.trim() || "ChatGPT 对话";
-    const turns = await collectConversation();
-    if (currentConversationURL() !== sourceURL) throw new Error("页面已切换到其他对话，请重试");
-    const appearance = await captureAppearance();
-    return {
-      html: buildHTML(title, sourceURL, turns, appearance),
-      filename: filenameForTitle(title),
-      turns: turns.length
-    };
+    if (exporting) throw new Error("当前对话正在导出，请稍候");
+    const scroller = conversationScroller();
+    if (!scroller) throw new Error("没有找到对话，请刷新页面后重试");
+    exporting = true;
+    cancelled = false;
+    sourceURL = location.href;
+    updateState({ status: "running", stage: "加载完整对话", detail: "正在加载隐藏的历史消息…", turns: 0, completed: 0, total: 0, startedAt: Date.now(), endedAt: null, permissionOrigin: null });
+    const style = scroller.getAttribute("style"), top = scroller.scrollTop;
+    const title = document.title || "ChatGPT";
+    try {
+      const keys = await expandConversation(scroller);
+      const roots = [...scroller.querySelectorAll(TURN)];
+      const cache = new Map();
+      const warnings = [];
+      updateState({ stage: "整理对话内容", detail: `正在保留 ${roots.length} 轮对话的原始布局…` });
+      await delay(0);
+      const layout = snapshotLayout(scroller, roots);
+      checkExport();
+      updateState({ stage: "保存图片和字体", detail: "" });
+      const appearancePromise = captureStyles();
+      const turnsPromise = settleAll(layout.copies.map(async ({root, clone}) => {
+        await inlineMedia(root, clone, cache);
+        for (const frame of clone.querySelectorAll("iframe")) {
+          const note = document.createElement("p");
+          note.textContent = "[嵌入式应用未保存，请打开原对话查看]";
+          frame.replaceWith(note);
+          warnings.push("嵌入式应用未保存");
+        }
+        sanitize(clone);
+      }));
+      // Wait for all resource work to settle before restoring the source page, even on error.
+      const results = await Promise.allSettled([appearancePromise, turnsPromise]);
+      const failure = results.find(result => result.status === "rejected");
+      checkExport();
+      if (failure) throw failure.reason;
+      if (location.href !== sourceURL) throw new Error("页面已切换到其他对话，请重试");
+      if (JSON.stringify([...scroller.querySelectorAll(TURN)].map(turn => turn.dataset.turnKey)) !== JSON.stringify(keys)) {
+        throw new Error("导出过程中对话发生变化，请重试");
+      }
+      updateState({ stage: "生成 HTML", detail: `正在整理 ${keys.length} 轮对话…` });
+      await delay(0);
+      checkExport();
+      const result = { html: buildHTML(layout, results[0].value, title),
+        filename: filenameForTitle(title), turns: keys.length, warnings: [...new Set(warnings)] };
+      updateState({ status: "done", stage: "HTML 已生成", detail: `${keys.length} 轮对话${warnings.length ? "；" + result.warnings.join("；") : "，可离线阅读"}`, endedAt: Date.now() });
+      return result;
+    } catch (error) {
+      updateState({ status: cancelled ? "cancelled" : "error", stage: cancelled ? "已取消导出" : "导出失败", detail: error.message, permissionOrigin: error.permissionOrigin, endedAt: Date.now() });
+      throw error;
+    } finally {
+      restoreStyle(scroller, style);
+      scroller.scrollTop = top;
+      exporting = false;
+    }
   }
 
   function downloadHTML(result) {
@@ -512,35 +407,21 @@ ${EXPORT_CSS}
     return { filename: link.download, turns: result.turns };
   }
 
-  let exporting = false;
   async function exportConversation() {
-    if (exporting) throw new Error("当前对话正在导出，请稍候");
-    exporting = true;
-    try {
-      return downloadHTML(await createConversationHTML());
-    } finally {
-      exporting = false;
-    }
+    const result = await createConversationHTML();
+    const downloaded = downloadHTML(result);
+    updateState({ stage: "已交给浏览器下载" });
+    return { ...downloaded, warnings: result.warnings };
   }
-
-  globalThis.ChatEnhanceExport = {
-    exportConversation, createConversationHTML, collectConversation, buildHTML,
-    downloadHTML, filenameForTitle, captureAppearance, highlightStaticPython
-  };
-
-  if (globalThis.chrome?.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type !== "chat-enhance-export-html") return false;
-      exportConversation()
-        .then((result) => sendResponse({ ok: true, ...result }))
-        .catch((error) => {
-          console.error("[Chat Enhance] HTML export failed:", error);
-          sendResponse({
-            ok: false, error: error.message || "导出失败",
-            permissionOrigin: error.permissionOrigin
-          });
-        });
-      return true;
-    });
-  }
+  globalThis.ChatEnhanceExport = { createConversationHTML, exportConversation };
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "chat-enhance-export-status") { sendResponse(state); return false; }
+    if (message?.type === "chat-enhance-cancel-export") { cancelExport(); sendResponse(state); return false; }
+    if (!["chat-enhance-export-html", "chat-enhance-create-html"].includes(message?.type)) return false;
+    const action = message.type === "chat-enhance-create-html" ? createConversationHTML : exportConversation;
+    action().then(result => sendResponse({ ok: true, ...result }), error => sendResponse({
+      ok: false, error: error.message || "导出失败", permissionOrigin: error.permissionOrigin
+    }));
+    return true;
+  });
 })();
